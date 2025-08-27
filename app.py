@@ -59,7 +59,6 @@ def clean_phone(x):
 def full_name_from(df: pd.DataFrame) -> pd.Series:
     if "full name as per nric" in df.columns:
         return df["full name as per nric"]
-    # fallback: stitch from parts if available
     first = df.get("first name as per nric", "")
     last  = df.get("middle and last name as per nric", "")
     return (first.fillna("").astype(str) + " " + last.fillna("").astype(str)).str.strip()
@@ -190,9 +189,11 @@ def convert_to_rc(df, preset_name="Default (as requested)"):
     df.columns = df.columns.str.strip().str.lower()
     df = df.dropna(how="all")
 
-    # get a name column (either explicit "full name..." or join first/last)
-    name_series = full_name_from(df)
-    df = df[name_series.notna() & (name_series.astype(str).str.strip() != "")].copy()
+    # Build a name series, filter, then RECOMPUTE name_series to match filtered rows
+    initial_names = full_name_from(df)
+    mask = initial_names.notna() & (initial_names.astype(str).str.strip() != "")
+    df = df[mask].copy()
+    name_series = full_name_from(df)  # <-- recompute AFTER filtering to keep lengths aligned
 
     preset = RC_PRESETS.get(preset_name, RC_PRESETS["Default (as requested)"])
 
