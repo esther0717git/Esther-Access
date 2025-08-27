@@ -7,9 +7,14 @@ import re
 import unicodedata
 from datetime import datetime
 
-# -------------------------------
+# -------------------------------------------------
+# Streamlit page config
+# -------------------------------------------------
+st.set_page_config(page_title="Data Center Format Converter 🌟 Murphy", layout="centered")
+
+# -------------------------------------------------
 # Helpers
-# -------------------------------
+# -------------------------------------------------
 def safe_company_name(df: pd.DataFrame) -> str:
     co_series = df.get("company full name")
     if co_series is not None:
@@ -59,9 +64,9 @@ def full_name_from(df: pd.DataFrame) -> pd.Series:
     last  = df.get("middle and last name as per nric", "")
     return (first.fillna("").astype(str) + " " + last.fillna("").astype(str)).str.strip()
 
-# -------------------------------
+# -------------------------------------------------
 # RC preset(s) - add more if needed
-# -------------------------------
+# -------------------------------------------------
 RC_PRESETS = {
     "Default (as requested)": {
         # A, D, H, I, J, K, L, M are fixed from this preset
@@ -76,9 +81,9 @@ RC_PRESETS = {
     }
 }
 
-# -------------------------------
+# -------------------------------------------------
 # AT Format
-# -------------------------------
+# -------------------------------------------------
 def convert_to_at_dc(df):
     df.columns = df.columns.str.strip().str.lower()
     df = df.dropna(how="all")
@@ -96,9 +101,9 @@ def convert_to_at_dc(df):
         st.error(f"❌ Missing expected column: {e}")
         return None, None
 
-# -------------------------------
+# -------------------------------------------------
 # DRT Format
-# -------------------------------
+# -------------------------------------------------
 def convert_to_drt_dc(df):
     df.columns = df.columns.str.strip().str.lower()
     df = df.dropna(how="all")
@@ -114,9 +119,9 @@ def convert_to_drt_dc(df):
         st.error(f"❌ Missing expected column: {e}")
         return None, None
 
-# -------------------------------
+# -------------------------------------------------
 # EQ Format
-# -------------------------------
+# -------------------------------------------------
 def convert_to_eq(df):
     df.columns = df.columns.str.strip().str.lower()
     df = df.dropna(how="all")
@@ -135,9 +140,9 @@ def convert_to_eq(df):
         st.error(f"❌ Missing expected column: {e}")
         return None, None
 
-# -------------------------------
+# -------------------------------------------------
 # STTLY Format
-# -------------------------------
+# -------------------------------------------------
 def convert_to_sttly(df):
     df.columns = df.columns.str.strip().str.lower()
     df = df.dropna(how="all")
@@ -162,9 +167,9 @@ def convert_to_sttly(df):
         st.error(f"❌ Missing expected column: {e}")
         return None, None
 
-# -------------------------------
+# -------------------------------------------------
 # RC Format (uses preset for A, D, H, I, J, K, L, M)
-# -------------------------------
+# -------------------------------------------------
 def convert_to_rc(df, preset_name="Default (as requested)"):
     """
     Build RC sheet:
@@ -185,10 +190,119 @@ def convert_to_rc(df, preset_name="Default (as requested)"):
     df.columns = df.columns.str.strip().str.lower()
     df = df.dropna(how="all")
 
+    # get a name column (either explicit "full name..." or join first/last)
     name_series = full_name_from(df)
     df = df[name_series.notna() & (name_series.astype(str).str.strip() != "")].copy()
 
     preset = RC_PRESETS.get(preset_name, RC_PRESETS["Default (as requested)"])
 
     try:
-        mobile = df.get("m
+        mobile = df.get("mobile number", pd.Series([""] * len(df))).apply(clean_phone)
+        plates = df.get("vehicle plate number", pd.Series([""] * len(df))).astype(str).str.replace(";", ",")
+        df_out = pd.DataFrame({
+            "Visitor Category":                   [preset["Visitor Category"]] * len(df),  # A
+            "Visitor Name":                       name_series,                              # B
+            "Visitor NRIC/Passport":              df["ic (last 3 digits and suffix) 123a"],# C
+            "Visitor Email":                      [preset["Visitor Email"]] * len(df),      # D
+            "Visitor Contact No":                 mobile,                                   # E
+            "Visitor Vehicle Number":             plates,                                   # F
+            "Visitor Company (UDF)":              df.get("company full name", pd.Series([""] * len(df))), # G
+            "Designation (E.g. Supervisor, Engineer) (UDF)": 
+                [preset["Designation (E.g. Supervisor, Engineer) (UDF)"]] * len(df),       # H
+            "Purpose of Visit (UDF)":             [preset["Purpose of Visit (UDF)"]] * len(df),  # I
+            "Level (UDF)":                        [preset["Level (UDF)"]] * len(df),        # J
+            "Location (UDF)":                     [preset["Location (UDF)"]] * len(df),     # K
+            "Rack ID (E.g. 71A01, 71A02) (UDF)":  [preset["Rack ID (E.g. 71A01, 71A02) (UDF)"]] * len(df), # L
+            "Host (UDF)":                         [preset["Host (UDF)"]] * len(df),         # M
+        })
+        return sanitize_df(df_out), safe_company_name(df)
+    except KeyError as e:
+        st.error(f"❌ Missing expected column for RC: {e}")
+        return None, None
+
+# -------------------------------------------------
+# App UI
+# -------------------------------------------------
+st.title("📮 DC Access 🌟 Murphy 🌟")
+
+uploaded_file = st.file_uploader("Upload the original visitor list (.xlsx)", type=["xlsx"])
+format_type = st.selectbox(
+    "Select the Data Center format to convert to",
+    ["AT", "DRT", "EQ", "STTLY", "RC"]  # includes RC
+)
+
+# Show ONE dropdown for RC presets only when RC is chosen
+rc_preset_name = None
+if format_type == "RC":
+    rc_preset_name = st.selectbox(
+        "RC defaults",
+        list(RC_PRESETS.keys()),
+        index=list(RC_PRESETS.keys()).index("Default (as requested)")
+    )
+
+if uploaded_file and format_type:
+    df = pd.read_excel(uploaded_file)
+
+    # Route to the correct converter
+    if format_type == "AT":
+        converted_df, company_name = convert_to_at_dc(df)
+    elif format_type == "DRT":
+        converted_df, company_name = convert_to_drt_dc(df)
+    elif format_type == "EQ":
+        converted_df, company_name = convert_to_eq(df)
+    elif format_type == "STTLY":
+        converted_df, company_name = convert_to_sttly(df)
+    elif format_type == "RC":
+        converted_df, company_name = convert_to_rc(df, preset_name=rc_preset_name)
+    else:
+        converted_df, company_name = None, None
+
+    # Export & styling
+    if converted_df is not None:
+        output = io.BytesIO()
+        with pd.ExcelWriter(
+            output,
+            engine="xlsxwriter",
+            engine_kwargs={"options": {"nan_inf_to_errors": True}}
+        ) as writer:
+            sheet = format_type
+            converted_df.to_excel(writer, index=False, sheet_name=sheet)
+            wb = writer.book
+            ws = writer.sheets[sheet]
+
+            header_fmt = wb.add_format({
+                "bold": True, "border": 1,
+                "align": "center", "valign": "vcenter",
+                "bg_color": "#548135", "font_color": "white"
+            })
+            cell_fmt = wb.add_format({
+                "border": 1, "align": "center", "valign": "vcenter"
+            })
+
+            # headers
+            for col_idx, col_name in enumerate(converted_df.columns):
+                ws.write(0, col_idx, col_name, header_fmt)
+
+            # rows
+            for r, row in enumerate(converted_df.itertuples(index=False, name=None), start=1):
+                write_row(ws, r, row, cell_fmt)
+
+            # auto-size columns
+            for i, col in enumerate(converted_df.columns):
+                data_max = converted_df[col].astype(str).map(len).max() if not converted_df.empty else 0
+                ws.set_column(i, i, max(len(col), data_max) + 2)
+
+            ws.set_default_row(18)
+
+        output.seek(0)
+        date_str = datetime.today().strftime("%Y%m%d")
+        stem = f"Upload_{format_type}_{company_name or 'UnknownCompany'}_{date_str}"
+        fname = make_safe_filename(stem, ".xlsx")  # only [A-Za-z0-9 _], no hyphens
+
+        st.success("✅ Conversion completed! Download below:")
+        st.download_button(
+            "📥 Download Converted Excel",
+            data=output,
+            file_name=fname,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
