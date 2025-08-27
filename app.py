@@ -51,10 +51,30 @@ def make_safe_filename(stem: str, ext: str = ".xlsx") -> str:
     norm = re.sub(r"[ _]+", "_", norm).strip("_")
     return f"{norm}{ext}"
 
-def clean_phone(x):
+def clean_phone(x, target_len=8):
+    """Return an 8-digit phone from mixed inputs.
+    - Handles floats like 86984997.0 without adding a trailing 0
+    - Strips all non-digits
+    - If longer than target_len, keep the LAST target_len digits
+    """
     if pd.isna(x):
         return ""
-    return "".join(ch for ch in str(x) if ch.isdigit())
+
+    # Handle numeric types first
+    if isinstance(x, (int, np.integer)):
+        s = str(int(x))
+    elif isinstance(x, float):
+        if np.isnan(x) or np.isinf(x):
+            return ""
+        s = str(int(x))  # 86984997.0 -> "86984997"
+    else:
+        s = re.sub(r"\D+", "", str(x))  # keep only digits
+
+    # If still longer (e.g., with country code), keep the last N digits
+    if target_len and len(s) > target_len:
+        s = s[-target_len:]
+
+    return s
 
 def full_name_from(df: pd.DataFrame) -> pd.Series:
     if "full name as per nric" in df.columns:
@@ -68,7 +88,6 @@ def full_name_from(df: pd.DataFrame) -> pd.Series:
 # -------------------------------------------------
 RC_PRESETS = {
     "Default (as requested)": {
-        # A, D, H, I, J, K, L, M are fixed from this preset
         "Visitor Category": "Visitor Access",     # A
         "Visitor Email": "liangwy@sea.com",       # D
         "Designation (E.g. Supervisor, Engineer) (UDF)": "Contractor",  # H
@@ -167,33 +186,16 @@ def convert_to_sttly(df):
         return None, None
 
 # -------------------------------------------------
-# RC Format (uses preset for A, D, H, I, J, K, L, M)
+# RC Format
 # -------------------------------------------------
 def convert_to_rc(df, preset_name="Default (as requested)"):
-    """
-    Build RC sheet:
-      A Visitor Category              <- preset
-      B Visitor Name                  <- from file
-      C Visitor NRIC/Passport         <- from file
-      D Visitor Email                 <- preset
-      E Visitor Contact No            <- from file (digits only)
-      F Visitor Vehicle Number        <- from file (';' -> ',')
-      G Visitor Company (UDF)         <- from file
-      H Designation (UDF)             <- preset
-      I Purpose of Visit (UDF)        <- preset
-      J Level (UDF)                   <- preset
-      K Location (UDF)                <- preset
-      L Rack ID (UDF)                 <- preset
-      M Host (UDF)                    <- preset
-    """
     df.columns = df.columns.str.strip().str.lower()
     df = df.dropna(how="all")
 
-    # Build a name series, filter, then RECOMPUTE name_series to match filtered rows
     initial_names = full_name_from(df)
     mask = initial_names.notna() & (initial_names.astype(str).str.strip() != "")
     df = df[mask].copy()
-    name_series = full_name_from(df)  # <-- recompute AFTER filtering to keep lengths aligned
+    name_series = full_name_from(df)
 
     preset = RC_PRESETS.get(preset_name, RC_PRESETS["Default (as requested)"])
 
@@ -201,20 +203,20 @@ def convert_to_rc(df, preset_name="Default (as requested)"):
         mobile = df.get("mobile number", pd.Series([""] * len(df))).apply(clean_phone)
         plates = df.get("vehicle plate number", pd.Series([""] * len(df))).astype(str).str.replace(";", ",")
         df_out = pd.DataFrame({
-            "Visitor Category":                   [preset["Visitor Category"]] * len(df),  # A
-            "Visitor Name":                       name_series,                              # B
-            "Visitor NRIC/Passport":              df["ic (last 3 digits and suffix) 123a"],# C
-            "Visitor Email":                      [preset["Visitor Email"]] * len(df),      # D
-            "Visitor Contact No":                 mobile,                                   # E
-            "Visitor Vehicle Number":             plates,                                   # F
-            "Visitor Company (UDF)":              df.get("company full name", pd.Series([""] * len(df))), # G
+            "Visitor Category":                   [preset["Visitor Category"]] * len(df),
+            "Visitor Name":                       name_series,
+            "Visitor NRIC/Passport":              df["ic (last 3 digits and suffix) 123a"],
+            "Visitor Email":                      [preset["Visitor Email"]] * len(df),
+            "Visitor Contact No":                 mobile,
+            "Visitor Vehicle Number":             plates,
+            "Visitor Company (UDF)":              df.get("company full name", pd.Series([""] * len(df))),
             "Designation (E.g. Supervisor, Engineer) (UDF)": 
-                [preset["Designation (E.g. Supervisor, Engineer) (UDF)"]] * len(df),       # H
-            "Purpose of Visit (UDF)":             [preset["Purpose of Visit (UDF)"]] * len(df),  # I
-            "Level (UDF)":                        [preset["Level (UDF)"]] * len(df),        # J
-            "Location (UDF)":                     [preset["Location (UDF)"]] * len(df),     # K
-            "Rack ID (E.g. 71A01, 71A02) (UDF)":  [preset["Rack ID (E.g. 71A01, 71A02) (UDF)"]] * len(df), # L
-            "Host (UDF)":                         [preset["Host (UDF)"]] * len(df),         # M
+                [preset["Designation (E.g. Supervisor, Engineer) (UDF)"]] * len(df),
+            "Purpose of Visit (UDF)":             [preset["Purpose of Visit (UDF)"]] * len(df),
+            "Level (UDF)":                        [preset["Level (UDF)"]] * len(df),
+            "Location (UDF)":                     [preset["Location (UDF)"]] * len(df),
+            "Rack ID (E.g. 71A01, 71A02) (UDF)":  [preset["Rack ID (E.g. 71A01, 71A02) (UDF)"]] * len(df),
+            "Host (UDF)":                         [preset["Host (UDF)"]] * len(df),
         })
         return sanitize_df(df_out), safe_company_name(df)
     except KeyError as e:
@@ -229,10 +231,9 @@ st.title("📮 DC Access 🌟 Murphy 🌟")
 uploaded_file = st.file_uploader("Upload the original visitor list (.xlsx)", type=["xlsx"])
 format_type = st.selectbox(
     "Select the Data Center format to convert to",
-    ["AT", "DRT", "EQ", "STTLY", "RC"]  # includes RC
+    ["AT", "DRT", "EQ", "STTLY", "RC"]
 )
 
-# Show ONE dropdown for RC presets only when RC is chosen
 rc_preset_name = None
 if format_type == "RC":
     rc_preset_name = st.selectbox(
@@ -244,7 +245,6 @@ if format_type == "RC":
 if uploaded_file and format_type:
     df = pd.read_excel(uploaded_file)
 
-    # Route to the correct converter
     if format_type == "AT":
         converted_df, company_name = convert_to_at_dc(df)
     elif format_type == "DRT":
@@ -258,7 +258,6 @@ if uploaded_file and format_type:
     else:
         converted_df, company_name = None, None
 
-    # Export & styling
     if converted_df is not None:
         output = io.BytesIO()
         with pd.ExcelWriter(
@@ -280,15 +279,12 @@ if uploaded_file and format_type:
                 "border": 1, "align": "center", "valign": "vcenter"
             })
 
-            # headers
             for col_idx, col_name in enumerate(converted_df.columns):
                 ws.write(0, col_idx, col_name, header_fmt)
 
-            # rows
             for r, row in enumerate(converted_df.itertuples(index=False, name=None), start=1):
                 write_row(ws, r, row, cell_fmt)
 
-            # auto-size columns
             for i, col in enumerate(converted_df.columns):
                 data_max = converted_df[col].astype(str).map(len).max() if not converted_df.empty else 0
                 ws.set_column(i, i, max(len(col), data_max) + 2)
@@ -298,7 +294,7 @@ if uploaded_file and format_type:
         output.seek(0)
         date_str = datetime.today().strftime("%Y%m%d")
         stem = f"Upload_{format_type}_{company_name or 'UnknownCompany'}_{date_str}"
-        fname = make_safe_filename(stem, ".xlsx")  # only [A-Za-z0-9 _], no hyphens
+        fname = make_safe_filename(stem, ".xlsx")
 
         st.success("✅ Conversion completed! Download below:")
         st.download_button(
