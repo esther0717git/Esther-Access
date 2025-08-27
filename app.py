@@ -60,6 +60,23 @@ def full_name_from(df: pd.DataFrame) -> pd.Series:
     return (first.fillna("").astype(str) + " " + last.fillna("").astype(str)).str.strip()
 
 # -------------------------------
+# RC preset(s) - add more if needed
+# -------------------------------
+RC_PRESETS = {
+    "Default (as requested)": {
+        # A, D, H, I, J, K, L, M are fixed from this preset
+        "Visitor Category": "Visitor Access",     # A
+        "Visitor Email": "liangwy@sea.com",       # D
+        "Designation (E.g. Supervisor, Engineer) (UDF)": "Contractor",  # H
+        "Purpose of Visit (UDF)": "access + relocation",                 # I
+        "Level (UDF)": "3,4",                     # J
+        "Location (UDF)": "All Halls",            # K
+        "Rack ID (E.g. 71A01, 71A02) (UDF)": "31A10",                    # L
+        "Host (UDF)": "Esther",                   # M
+    }
+}
+
+# -------------------------------
 # AT Format
 # -------------------------------
 def convert_to_at_dc(df):
@@ -146,130 +163,32 @@ def convert_to_sttly(df):
         return None, None
 
 # -------------------------------
-# RC Format
+# RC Format (uses preset for A, D, H, I, J, K, L, M)
 # -------------------------------
-def convert_to_rc(df):
+def convert_to_rc(df, preset_name="Default (as requested)"):
     """
     Build RC sheet:
-      A Visitor Category              -> 'Visitor Access'
-      B Visitor Name                  -> full name
-      C Visitor NRIC/Passport         -> IC last 3 + suffix
-      D Visitor Email                 -> liangwy@sea.com
-      E Visitor Contact No            -> mobile digits only
-      F Visitor Vehicle Number        -> 'vehicle plate number' with ';' -> ','
-      G Visitor Company (UDF)         -> company full name
-      H Designation (UDF)             -> 'Contractor'
-      I Purpose of Visit (UDF)        -> 'access + relocation'
-      J Level (UDF)                   -> '3,4'
-      K Location (UDF)                -> 'All Halls'
-      L Rack ID (UDF)                 -> '31A10'
-      M Host (UDF)                    -> 'Esther'
+      A Visitor Category              <- preset
+      B Visitor Name                  <- from file
+      C Visitor NRIC/Passport         <- from file
+      D Visitor Email                 <- preset
+      E Visitor Contact No            <- from file (digits only)
+      F Visitor Vehicle Number        <- from file (';' -> ',')
+      G Visitor Company (UDF)         <- from file
+      H Designation (UDF)             <- preset
+      I Purpose of Visit (UDF)        <- preset
+      J Level (UDF)                   <- preset
+      K Location (UDF)                <- preset
+      L Rack ID (UDF)                 <- preset
+      M Host (UDF)                    <- preset
     """
     df.columns = df.columns.str.strip().str.lower()
     df = df.dropna(how="all")
 
-    # we can accept either "full name as per nric" or the first/last pair
     name_series = full_name_from(df)
-    # Filter on rows that have some name
     df = df[name_series.notna() & (name_series.astype(str).str.strip() != "")].copy()
+
+    preset = RC_PRESETS.get(preset_name, RC_PRESETS["Default (as requested)"])
+
     try:
-        mobile = df.get("mobile number", pd.Series([""] * len(df))).apply(clean_phone)
-        plates = df.get("vehicle plate number", pd.Series([""] * len(df))).astype(str).str.replace(";", ",")
-        df_out = pd.DataFrame({
-            "Visitor Category":                 ["Visitor Access"] * len(df),
-            "Visitor Name":                     name_series,
-            "Visitor NRIC/Passport":            df["ic (last 3 digits and suffix) 123a"],
-            "Visitor Email":                    ["liangwy@sea.com"] * len(df),
-            "Visitor Contact No":               mobile,
-            "Visitor Vehicle Number":           plates,
-            "Visitor Company (UDF)":            df.get("company full name", pd.Series([""] * len(df))),
-            "Designation (E.g. Supervisor, Engineer) (UDF)": ["Contractor"] * len(df),
-            "Purpose of Visit (UDF)":           ["access + relocation"] * len(df),
-            "Level (UDF)":                      ["3,4"] * len(df),
-            "Location (UDF)":                   ["All Halls"] * len(df),
-            "Rack ID (E.g. 71A01, 71A02) (UDF)": ["31A10"] * len(df),
-            "Host (UDF)":                       ["Esther"] * len(df),
-        })
-        return sanitize_df(df_out), safe_company_name(df)
-    except KeyError as e:
-        st.error(f"❌ Missing expected column for RC: {e}")
-        return None, None
-
-# -------------------------------
-# Streamlit App
-# -------------------------------
-st.set_page_config(page_title="Data Center Format Converter 🌟 Esther", layout="centered")
-st.title("DC Access 🌟 Esther 🌟")
-
-uploaded_file = st.file_uploader("Upload the original visitor list (.xlsx)", type=["xlsx"])
-format_type = st.selectbox(
-    "Select the Data Center format to convert to",
-    ["AT", "DRT", "EQ", "STTLY", "RC"]  # <- added RC
-)
-
-if uploaded_file and format_type:
-    df = pd.read_excel(uploaded_file)
-
-    # route to the correct converter
-    if format_type == "AT":
-        converted_df, company_name = convert_to_at_dc(df)
-    elif format_type == "DRT":
-        converted_df, company_name = convert_to_drt_dc(df)
-    elif format_type == "EQ":
-        converted_df, company_name = convert_to_eq(df)
-    elif format_type == "STTLY":
-        converted_df, company_name = convert_to_sttly(df)
-    elif format_type == "RC":
-        converted_df, company_name = convert_to_rc(df)
-    else:
-        converted_df, company_name = None, None
-
-    # export & styling
-    if converted_df is not None:
-        output = io.BytesIO()
-        with pd.ExcelWriter(
-            output,
-            engine="xlsxwriter",
-            engine_kwargs={"options": {"nan_inf_to_errors": True}}
-        ) as writer:
-            sheet = format_type
-            converted_df.to_excel(writer, index=False, sheet_name=sheet)
-            wb = writer.book
-            ws = writer.sheets[sheet]
-
-            header_fmt = wb.add_format({
-                "bold": True, "border": 1,
-                "align": "center", "valign": "vcenter",
-                "bg_color": "#548135", "font_color": "white"
-            })
-            cell_fmt = wb.add_format({
-                "border": 1, "align": "center", "valign": "vcenter"
-            })
-
-            # headers
-            for col_idx, col_name in enumerate(converted_df.columns):
-                ws.write(0, col_idx, col_name, header_fmt)
-
-            # rows
-            for r, row in enumerate(converted_df.itertuples(index=False, name=None), start=1):
-                write_row(ws, r, row, cell_fmt)
-
-            # auto-size columns
-            for i, col in enumerate(converted_df.columns):
-                data_max = converted_df[col].astype(str).map(len).max() if not converted_df.empty else 0
-                ws.set_column(i, i, max(len(col), data_max) + 2)
-
-            ws.set_default_row(18)
-
-        output.seek(0)
-        date_str = datetime.today().strftime("%Y%m%d")
-        stem = f"Upload_{format_type}_{company_name or 'UnknownCompany'}_{date_str}"
-        fname = make_safe_filename(stem, ".xlsx")  # only [A-Za-z0-9 _], no hyphens
-
-        st.success("✅ Conversion completed! Download below:")
-        st.download_button(
-            "📥 Download Converted Excel",
-            data=output,
-            file_name=fname,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        mobile = df.get("m
