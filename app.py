@@ -199,7 +199,7 @@ def convert_to_rc(df):
 # Streamlit App
 # -------------------------------
 st.set_page_config(page_title="Data Center Format Converter 🌟 Esther", layout="centered")
-st.title("📮 DC Access 🌟 Esther 🌟")
+st.title("DC Access 🌟 Esther 🌟")
 
 uploaded_file = st.file_uploader("Upload the original visitor list (.xlsx)", type=["xlsx"])
 format_type = st.selectbox(
