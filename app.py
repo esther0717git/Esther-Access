@@ -36,19 +36,28 @@ def write_row(ws, r, row_values, cell_fmt):
 
 def make_safe_filename(stem: str, ext: str = ".xlsx") -> str:
     """
-    Keep only alphanumeric, space, underscore.
-    Convert hyphens and all other characters to underscore.
+    Keep only alphanumeric, space, underscore (no hyphens).
+    Convert any other character (including '-') to underscore.
     Collapse repeats and trim.
     """
-    # fold to ASCII (drop accents/emoji)
     norm = unicodedata.normalize("NFKD", stem).encode("ascii", "ignore").decode("ascii")
-    # replace hyphens with underscore explicitly
     norm = norm.replace("-", "_")
-    # allow only [A-Za-z0-9 _]; replace others with underscore
     norm = re.sub(r"[^A-Za-z0-9 _]", "_", norm)
-    # collapse multiple spaces/underscores
     norm = re.sub(r"[ _]+", "_", norm).strip("_")
     return f"{norm}{ext}"
+
+def clean_phone(x):
+    if pd.isna(x):
+        return ""
+    return "".join(ch for ch in str(x) if ch.isdigit())
+
+def full_name_from(df: pd.DataFrame) -> pd.Series:
+    if "full name as per nric" in df.columns:
+        return df["full name as per nric"]
+    # fallback: stitch from parts if available
+    first = df.get("first name as per nric", "")
+    last  = df.get("middle and last name as per nric", "")
+    return (first.fillna("").astype(str) + " " + last.fillna("").astype(str)).str.strip()
 
 # -------------------------------
 # AT Format
@@ -119,14 +128,8 @@ def convert_to_sttly(df):
     try:
         nationality = df.get("nationality (country name)", pd.Series([""] * len(df)))
         mobile = df.get("mobile number", pd.Series([""] * len(df)))
-
-        def clean_phone(x):
-            if pd.isna(x):
-                return ""
-            return "".join(ch for ch in str(x) if ch.isdigit())
-
         df_out = pd.DataFrame({
-            "Name*": df["full name as per nric"],
+            "Name*": full_name_from(df),
             "Company*": df["company full name"],
             "Type (Visitor, Contractor)*": df["company full name"].apply(
                 lambda x: "Visitor" if "sea" in str(x).lower() else "Contractor"
@@ -143,6 +146,56 @@ def convert_to_sttly(df):
         return None, None
 
 # -------------------------------
+# RC Format
+# -------------------------------
+def convert_to_rc(df):
+    """
+    Build RC sheet:
+      A Visitor Category              -> 'Visitor Access'
+      B Visitor Name                  -> full name
+      C Visitor NRIC/Passport         -> IC last 3 + suffix
+      D Visitor Email                 -> liangwy@sea.com
+      E Visitor Contact No            -> mobile digits only
+      F Visitor Vehicle Number        -> 'vehicle plate number' with ';' -> ','
+      G Visitor Company (UDF)         -> company full name
+      H Designation (UDF)             -> 'Contractor'
+      I Purpose of Visit (UDF)        -> 'access + relocation'
+      J Level (UDF)                   -> '3,4'
+      K Location (UDF)                -> 'All Halls'
+      L Rack ID (UDF)                 -> '31A10'
+      M Host (UDF)                    -> 'Esther'
+    """
+    df.columns = df.columns.str.strip().str.lower()
+    df = df.dropna(how="all")
+
+    # we can accept either "full name as per nric" or the first/last pair
+    name_series = full_name_from(df)
+    # Filter on rows that have some name
+    df = df[name_series.notna() & (name_series.astype(str).str.strip() != "")].copy()
+    try:
+        mobile = df.get("mobile number", pd.Series([""] * len(df))).apply(clean_phone)
+        plates = df.get("vehicle plate number", pd.Series([""] * len(df))).astype(str).str.replace(";", ",")
+        df_out = pd.DataFrame({
+            "Visitor Category":                 ["Visitor Access"] * len(df),
+            "Visitor Name":                     name_series,
+            "Visitor NRIC/Passport":            df["ic (last 3 digits and suffix) 123a"],
+            "Visitor Email":                    ["liangwy@sea.com"] * len(df),
+            "Visitor Contact No":               mobile,
+            "Visitor Vehicle Number":           plates,
+            "Visitor Company (UDF)":            df.get("company full name", pd.Series([""] * len(df))),
+            "Designation (E.g. Supervisor, Engineer) (UDF)": ["Contractor"] * len(df),
+            "Purpose of Visit (UDF)":           ["access + relocation"] * len(df),
+            "Level (UDF)":                      ["3,4"] * len(df),
+            "Location (UDF)":                   ["All Halls"] * len(df),
+            "Rack ID (E.g. 71A01, 71A02) (UDF)": ["31A10"] * len(df),
+            "Host (UDF)":                       ["Esther"] * len(df),
+        })
+        return sanitize_df(df_out), safe_company_name(df)
+    except KeyError as e:
+        st.error(f"❌ Missing expected column for RC: {e}")
+        return None, None
+
+# -------------------------------
 # Streamlit App
 # -------------------------------
 st.set_page_config(page_title="Data Center Format Converter 🌟 Murphy", layout="centered")
@@ -151,7 +204,7 @@ st.title("📮 DC Access 🌟 Murphy 🌟")
 uploaded_file = st.file_uploader("Upload the original visitor list (.xlsx)", type=["xlsx"])
 format_type = st.selectbox(
     "Select the Data Center format to convert to",
-    ["AT", "DRT", "EQ", "STTLY"]
+    ["AT", "DRT", "EQ", "STTLY", "RC"]  # <- added RC
 )
 
 if uploaded_file and format_type:
@@ -166,6 +219,8 @@ if uploaded_file and format_type:
         converted_df, company_name = convert_to_eq(df)
     elif format_type == "STTLY":
         converted_df, company_name = convert_to_sttly(df)
+    elif format_type == "RC":
+        converted_df, company_name = convert_to_rc(df)
     else:
         converted_df, company_name = None, None
 
@@ -208,9 +263,8 @@ if uploaded_file and format_type:
 
         output.seek(0)
         date_str = datetime.today().strftime("%Y%m%d")
-        # Build a compliant filename: only A–Z a–z 0–9 space underscore; no hyphens
         stem = f"Upload_{format_type}_{company_name or 'UnknownCompany'}_{date_str}"
-        fname = make_safe_filename(stem, ".xlsx")
+        fname = make_safe_filename(stem, ".xlsx")  # only [A-Za-z0-9 _], no hyphens
 
         st.success("✅ Conversion completed! Download below:")
         st.download_button(
@@ -219,5 +273,3 @@ if uploaded_file and format_type:
             file_name=fname,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-
-
