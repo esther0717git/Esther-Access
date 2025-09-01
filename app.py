@@ -10,7 +10,7 @@ from datetime import datetime
 # -------------------------------------------------
 # Streamlit page config
 # -------------------------------------------------
-st.set_page_config(page_title="Data Center Format Converter 🌟 Murphy", layout="centered")
+st.set_page_config(page_title="Data Center Format Converter 🌟 Esther", layout="centered")
 
 # -------------------------------------------------
 # Helpers
