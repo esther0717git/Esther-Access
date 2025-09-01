@@ -139,7 +139,7 @@ def convert_to_drt_dc(df):
         df_out = pd.DataFrame({
             "First Name":    df["first name as per nric"],
             "Last Name":     df["middle and last name as per nric"],
-            "Email Address": ["chenh@sea.com"] * len(df),
+            "Email Address": ["liangwy@sea.com"] * len(df),
         })
         return sanitize_df(df_out), safe_company_name(df)
     except KeyError as e:
@@ -158,7 +158,7 @@ def convert_to_eq(df):
             "Legal First Name":       df["first name as per nric"],
             "Legal Last Name":        df["middle and last name as per nric"],
             "Company":                df["company full name"],
-            "Email (Optional)":       ["chenh@sea.com"] * len(df),
+            "Email (Optional)":       ["liangwy@sea.com"] * len(df),
             "Country Code (Optional)": ["" for _ in range(len(df))],
             "Mobile Phone (Optional)": ["" for _ in range(len(df))]
         })
