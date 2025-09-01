@@ -200,23 +200,28 @@ def convert_to_rc(df, preset_name="Default (as requested)"):
     preset = RC_PRESETS.get(preset_name, RC_PRESETS["Default (as requested)"])
 
     try:
-        mobile = df.get("mobile number", pd.Series([""] * len(df))).apply(clean_phone)
-        plates = df.get("vehicle plate number", pd.Series([""] * len(df))).astype(str).str.replace(";", ",")
+        mobile = df.get("mobile number", pd.Series([""] * len(df))).apply(clean_phone).fillna("")
+        plates = (
+            df.get("vehicle plate number", pd.Series([""] * len(df)))
+            .astype(str)
+            .str.replace(";", ",")
+            .fillna("")
+        )
         df_out = pd.DataFrame({
-            "Visitor Category":                   [preset["Visitor Category"]] * len(df),
-            "Visitor Name":                       name_series,
-            "Visitor NRIC/Passport":              df["ic (last 3 digits and suffix) 123a"],
-            "Visitor Email":                      [preset["Visitor Email"]] * len(df),
-            "Visitor Contact No":                 mobile,
-            "Visitor Vehicle Number":             plates,
-            "Visitor Company (UDF)":              df.get("company full name", pd.Series([""] * len(df))),
-            "Designation (E.g. Supervisor, Engineer) (UDF)": 
+            "Visitor Category": [preset["Visitor Category"]] * len(df),
+            "Visitor Name": name_series.fillna(""),
+            "Visitor NRIC/Passport": df["ic (last 3 digits and suffix) 123a"].fillna(""),
+            "Visitor Email": [preset["Visitor Email"]] * len(df),
+            "Visitor Contact No": mobile,
+            "Visitor Vehicle Number": plates,
+            "Visitor Company (UDF)": df.get("company full name", pd.Series([""] * len(df))).fillna(""),
+            "Designation (E.g. Supervisor, Engineer) (UDF)":
                 [preset["Designation (E.g. Supervisor, Engineer) (UDF)"]] * len(df),
-            "Purpose of Visit (UDF)":             [preset["Purpose of Visit (UDF)"]] * len(df),
-            "Level (UDF)":                        [preset["Level (UDF)"]] * len(df),
-            "Location (UDF)":                     [preset["Location (UDF)"]] * len(df),
-            "Rack ID (E.g. 71A01, 71A02) (UDF)":  [preset["Rack ID (E.g. 71A01, 71A02) (UDF)"]] * len(df),
-            "Host (UDF)":                         [preset["Host (UDF)"]] * len(df),
+            "Purpose of Visit (UDF)": [preset["Purpose of Visit (UDF)"]] * len(df),
+            "Level (UDF)": [preset["Level (UDF)"]] * len(df),
+            "Location (UDF)": [preset["Location (UDF)"]] * len(df),
+            "Rack ID (E.g. 71A01, 71A02) (UDF)": [preset["Rack ID (E.g. 71A01, 71A02) (UDF)"]] * len(df),
+            "Host (UDF)": [preset["Host (UDF)"]] * len(df),
         })
         return sanitize_df(df_out), safe_company_name(df)
     except KeyError as e:
