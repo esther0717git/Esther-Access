@@ -226,7 +226,7 @@ def convert_to_rc(df, preset_name="Default (as requested)"):
 # -------------------------------------------------
 # App UI
 # -------------------------------------------------
-st.title("📮 DC Access 🌟 Murphy 🌟")
+st.title(" DC Access 🌟 Esther 🌟")
 
 uploaded_file = st.file_uploader("Upload the original visitor list (.xlsx)", type=["xlsx"])
 format_type = st.selectbox(
