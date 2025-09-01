@@ -84,6 +84,15 @@ def full_name_from(df: pd.DataFrame) -> pd.Series:
     return (first.fillna("").astype(str) + " " + last.fillna("").astype(str)).str.strip()
 
 # -------------------------------------------------
+# Helper (put this near your other helpers)
+# -------------------------------------------------
+def as_str_or_blank(series: pd.Series | None, length: int) -> pd.Series:
+    """Convert a Series to string values but keep missing as '' (never 'nan')."""
+    if series is None:
+        return pd.Series([""] * length)
+    return series.apply(lambda x: "" if pd.isna(x) else str(x))
+
+# -------------------------------------------------
 # RC preset(s) - add more if needed
 # -------------------------------------------------
 RC_PRESETS = {
@@ -186,44 +195,54 @@ def convert_to_sttly(df):
         return None, None
 
 # -------------------------------------------------
-# RC Format
+# RC Format (replace your existing convert_to_rc with this)
 # -------------------------------------------------
 def convert_to_rc(df, preset_name="Default (as requested)"):
     df.columns = df.columns.str.strip().str.lower()
     df = df.dropna(how="all")
 
+    # keep only rows with a non-empty name
     initial_names = full_name_from(df)
     mask = initial_names.notna() & (initial_names.astype(str).str.strip() != "")
     df = df[mask].copy()
-    name_series = full_name_from(df)
 
     preset = RC_PRESETS.get(preset_name, RC_PRESETS["Default (as requested)"])
 
     try:
-        mobile = df.get("mobile number", pd.Series([""] * len(df))).apply(clean_phone).fillna("")
+        length = len(df)
+
+        # build columns with NA-safe conversions (no literal "nan")
+        name_series = full_name_from(df).fillna("").astype(str).str.strip()
+        nric_series = as_str_or_blank(df.get("ic (last 3 digits and suffix) 123a"), length)
+        mobile = df.get("mobile number", pd.Series([""] * length)).apply(clean_phone)
         plates = (
-            df.get("vehicle plate number", pd.Series([""] * len(df)))
-            .astype(str)
-            .str.replace(";", ",")
-            .fillna("")
+            as_str_or_blank(df.get("vehicle plate number"), length)
+            .str.replace(";", ",", regex=False)
+            .str.strip()
         )
+        company = as_str_or_blank(df.get("company full name"), length)
+
         df_out = pd.DataFrame({
-            "Visitor Category": [preset["Visitor Category"]] * len(df),
-            "Visitor Name": name_series.fillna(""),
-            "Visitor NRIC/Passport": df["ic (last 3 digits and suffix) 123a"].fillna(""),
-            "Visitor Email": [preset["Visitor Email"]] * len(df),
-            "Visitor Contact No": mobile,
-            "Visitor Vehicle Number": plates,
-            "Visitor Company (UDF)": df.get("company full name", pd.Series([""] * len(df))).fillna(""),
+            "Visitor Category": [preset["Visitor Category"]] * length,
+            "Visitor Name": name_series,
+            "Visitor NRIC/Passport": nric_series,
+            "Visitor Email": [preset["Visitor Email"]] * length,
+            "Visitor Contact No": mobile,                      # clean_phone returns '' for NA
+            "Visitor Vehicle Number": plates,                  # no "nan"
+            "Visitor Company (UDF)": company,
             "Designation (E.g. Supervisor, Engineer) (UDF)":
-                [preset["Designation (E.g. Supervisor, Engineer) (UDF)"]] * len(df),
-            "Purpose of Visit (UDF)": [preset["Purpose of Visit (UDF)"]] * len(df),
-            "Level (UDF)": [preset["Level (UDF)"]] * len(df),
-            "Location (UDF)": [preset["Location (UDF)"]] * len(df),
-            "Rack ID (E.g. 71A01, 71A02) (UDF)": [preset["Rack ID (E.g. 71A01, 71A02) (UDF)"]] * len(df),
-            "Host (UDF)": [preset["Host (UDF)"]] * len(df),
+                [preset["Designation (E.g. Supervisor, Engineer) (UDF)"]] * length,
+            "Purpose of Visit (UDF)": [preset["Purpose of Visit (UDF)"]] * length,
+            "Level (UDF)": [preset["Level (UDF)"]] * length,
+            "Location (UDF)": [preset["Location (UDF)"]] * length,
+            "Rack ID (E.g. 71A01, 71A02) (UDF)":
+                [preset["Rack ID (E.g. 71A01, 71A02) (UDF)"]] * length,
+            "Host (UDF)": [preset["Host (UDF)"]] * length,
         })
+
+        # convert NaN/NA/Inf to None for clean Excel blanks
         return sanitize_df(df_out), safe_company_name(df)
+
     except KeyError as e:
         st.error(f"❌ Missing expected column for RC: {e}")
         return None, None
