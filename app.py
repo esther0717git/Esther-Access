@@ -256,7 +256,7 @@ uploaded_file = st.file_uploader("Upload the original visitor list (.xlsx)", typ
 format_type = st.selectbox(
     "Select the Data Center format to convert to",
     ["SGP AirTrunk (AT)", 
-     "SGP Digital Realty SIN12 (DRT) - Shopee | USA Digital Realty DFW14",
+     "SGP Digital Realty SIN12 (DRT) - Shopee",
      "SGP Equinix | SG4 | SG5 | USDA11 | USDC15",
      "SGP STT Loyang (LY)",
      "SGP Racks Central (RC)"]
