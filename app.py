@@ -256,7 +256,7 @@ uploaded_file = st.file_uploader("Upload the original visitor list (.xlsx)", typ
 format_type = st.selectbox(
     "Select the Data Center format to convert to",
     ["AT", 
-     "DRT",
+     "SG DRT",
      "EQSG4|SG5|USDA11|USDC15",
      "STTLY",
      "RC"]
@@ -275,7 +275,7 @@ if uploaded_file and format_type:
 
     if format_type == "AT":
         converted_df, company_name = convert_to_at_dc(df)
-    elif format_type == "DRT":
+    elif format_type == "SG DRT":
         converted_df, company_name = convert_to_drt_dc(df)
     elif format_type == "EQSG4|SG5|USDA11|USDC15":
         converted_df, company_name = convert_to_eq(df)
