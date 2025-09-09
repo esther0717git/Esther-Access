@@ -90,14 +90,14 @@ def as_str_or_blank(series: pd.Series | None, length: int) -> pd.Series:
 # -------------------------------------------------
 RC_PRESETS = {
     "Default (as requested)": {
-        "Visitor Category": "Visitor Access",     # A
-        "Visitor Email": "liangwy@sea.com",       # D
-        "Designation (E.g. Supervisor, Engineer) (UDF)": "Contractor",  # H
-        "Purpose of Visit (UDF)": "access + relocation",                 # I
-        "Level (UDF)": "3,4",                     # J
-        "Location (UDF)": "All Halls",            # K
-        "Rack ID (E.g. 71A01, 71A02) (UDF)": "31A10",                    # L
-        "Host (UDF)": "Esther",                   # M
+        "Visitor Category": "Visitor Access",
+        "Visitor Email": "liangwy@sea.com",
+        "Designation (E.g. Supervisor, Engineer) (UDF)": "Contractor",
+        "Purpose of Visit (UDF)": "access + relocation",
+        "Level (UDF)": "3,4",
+        "Location (UDF)": "All Halls",
+        "Rack ID (E.g. 71A01, 71A02) (UDF)": "31A10",
+        "Host (UDF)": "Esther",
     }
 }
 
@@ -278,12 +278,9 @@ format_type = st.selectbox(
     "Select the Data Center format to convert to",
     [
         "AT",
-        "SG DRT",   # 13-col
-        "US DRT",   # 11-col
-        "EQ SG4",
-        "EQ SG5",
-        "EQ USDA11",
-        "EQ USDC15",
+        "SG DRT",
+        "US DRT",
+        "EQ (SG4 / SG5 / DA11 / DC15)",
         "STTLY",
         "RC",
     ]
@@ -306,7 +303,7 @@ if uploaded_file and format_type:
         converted_df, company_name = convert_to_sg_drt_dc(df)
     elif format_type == "US DRT":
         converted_df, company_name = convert_to_us_drt_dc(df)
-    elif format_type in ["EQ SG4", "EQ SG5", "EQ USDA11", "EQ USDC15"]:
+    elif format_type == "EQ (SG4 / SG5 / DA11 / DC15)":
         converted_df, company_name = convert_to_eq(df)
     elif format_type == "STTLY":
         converted_df, company_name = convert_to_sttly(df)
@@ -322,7 +319,12 @@ if uploaded_file and format_type:
             engine="xlsxwriter",
             engine_kwargs={"options": {"nan_inf_to_errors": True}}
         ) as writer:
-            sheet = safe_sheet_name(format_type)
+            # Tab name fix for EQ
+            if format_type == "EQ (SG4 / SG5 / DA11 / DC15)":
+                sheet = "EQ"
+            else:
+                sheet = safe_sheet_name(format_type)
+
             converted_df.to_excel(writer, index=False, sheet_name=sheet)
             wb = writer.book
             ws = writer.sheets[sheet]
@@ -350,7 +352,13 @@ if uploaded_file and format_type:
 
         output.seek(0)
         date_str = datetime.today().strftime("%Y%m%d")
-        stem = f"Upload_{format_type}_{company_name or 'UnknownCompany'}_{date_str}"
+
+        # File name fix for EQ
+        if format_type == "EQ (SG4 / SG5 / DA11 / DC15)":
+            stem = f"Upload_EQ_{company_name or 'UnknownCompany'}_{date_str}"
+        else:
+            stem = f"Upload_{format_type}_{company_name or 'UnknownCompany'}_{date_str}"
+
         fname = make_safe_filename(stem, ".xlsx")
 
         st.success("✅ Conversion completed! Download below:")
@@ -360,3 +368,4 @@ if uploaded_file and format_type:
             file_name=fname,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+
