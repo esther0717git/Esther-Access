@@ -259,9 +259,9 @@ def convert_to_cyrusone(df: pd.DataFrame):
         st.error("❌ CyrusOne expects 11-column or 13-column sheet.")
         return None, None
 
-    company = raw.iloc[:, 2]
-    first   = raw.iloc[:, 4]
-    last    = raw.iloc[:, 5]
+    company = raw.iloc[:, 2]  # C
+    first   = raw.iloc[:, 4]  # E
+    last    = raw.iloc[:, 5]  # F
 
     mask = (
         first.notna() & (first.astype(str).str.strip() != "") &
@@ -358,7 +358,7 @@ if uploaded_file and format_type:
             file_ext = ".xlsx"
             mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         elif format_type == "CyrusOne":
-            sheet = "cyrusone_visitors_template"
+            sheet = "cyrusone_visitors_template"  # conceptual; CSV has no tabs
             stem  = f"Upload CyrusOne {company_name} {date_str}"
             file_ext = ".csv"
             mime = "text/csv"
@@ -368,11 +368,12 @@ if uploaded_file and format_type:
             file_ext = ".xlsx"
             mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
+        # Output per type
         if file_ext == ".csv":
             output = io.BytesIO()
             converted_df.to_csv(output, index=False)
             output.seek(0)
-            fname = f"{stem}{file_ext}"  # keep spaces
+            fname = f"{stem}{file_ext}"  # keep spaces for CyrusOne
             st.success("✅ Conversion completed! Download below:")
             st.download_button(
                 "📥 Download Converted CSV",
@@ -400,11 +401,30 @@ if uploaded_file and format_type:
                     "border": 1, "align": "center", "valign": "vcenter"
                 })
 
+                # style header
                 for col_idx, col_name in enumerate(converted_df.columns):
                     ws.write(0, col_idx, col_name, header_fmt)
 
+                # body rows
                 for r, row in enumerate(converted_df.itertuples(index=False, name=None), start=1):
                     write_row(ws, r, row, cell_fmt)
 
+                # autosize columns (✅ fixed ternary with else)
                 for i, col in enumerate(converted_df.columns):
-                    data_max = converted_df[col].astype(str).map(len).max() if not converted_df.empty
+                    data_max = (
+                        converted_df[col].astype(str).map(len).max()
+                        if not converted_df.empty else 0
+                    )
+                    ws.set_column(i, i, max(len(col), data_max) + 2)
+
+                ws.set_default_row(18)
+
+            output.seek(0)
+            fname = make_safe_filename(stem, file_ext)
+            st.success("✅ Conversion completed! Download below:")
+            st.download_button(
+                "📥 Download Converted Excel",
+                data=output,
+                file_name=fname,
+                mime=mime
+            )
