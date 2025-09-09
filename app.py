@@ -51,6 +51,11 @@ def make_safe_filename(stem: str, ext: str = ".xlsx") -> str:
     norm = re.sub(r"[ _]+", "_", norm).strip("_")
     return f"{norm}{ext}"
 
+def safe_sheet_name(name: str) -> str:
+    """Excel sheet names must be <= 31 chars and cannot contain : \ / ? * [ ]"""
+    name = re.sub(r'[:\\/?*\[\]]', '_', str(name))
+    return name[:31] if len(name) > 31 else name
+
 def clean_phone(x, target_len=8):
     """Return an 8-digit phone from mixed inputs.
     - Handles floats like 86984997.0 without adding a trailing 0
@@ -59,21 +64,16 @@ def clean_phone(x, target_len=8):
     """
     if pd.isna(x):
         return ""
-
-    # Handle numeric types first
     if isinstance(x, (int, np.integer)):
         s = str(int(x))
     elif isinstance(x, float):
         if np.isnan(x) or np.isinf(x):
             return ""
-        s = str(int(x))  # 86984997.0 -> "86984997"
+        s = str(int(x))
     else:
-        s = re.sub(r"\D+", "", str(x))  # keep only digits
-
-    # If still longer (e.g., with country code), keep the last N digits
+        s = re.sub(r"\D+", "", str(x))
     if target_len and len(s) > target_len:
         s = s[-target_len:]
-
     return s
 
 def full_name_from(df: pd.DataFrame) -> pd.Series:
@@ -83,9 +83,6 @@ def full_name_from(df: pd.DataFrame) -> pd.Series:
     last  = df.get("middle and last name as per nric", "")
     return (first.fillna("").astype(str) + " " + last.fillna("").astype(str)).str.strip()
 
-# -------------------------------------------------
-# Helper (put this near your other helpers)
-# -------------------------------------------------
 def as_str_or_blank(series: pd.Series | None, length: int) -> pd.Series:
     """Convert a Series to string values but keep missing as '' (never 'nan')."""
     if series is None:
@@ -93,7 +90,7 @@ def as_str_or_blank(series: pd.Series | None, length: int) -> pd.Series:
     return series.apply(lambda x: "" if pd.isna(x) else str(x))
 
 # -------------------------------------------------
-# RC preset(s) - add more if needed
+# RC preset(s)
 # -------------------------------------------------
 RC_PRESETS = {
     "Default (as requested)": {
@@ -111,7 +108,8 @@ RC_PRESETS = {
 # -------------------------------------------------
 # AT Format
 # -------------------------------------------------
-def convert_to_at_dc(df):
+def convert_to_at_dc(df: pd.DataFrame):
+    df = df.copy()
     df.columns = df.columns.str.strip().str.lower()
     df = df.dropna(how="all")
     df = df[df["first name as per nric"].notna()]
@@ -129,9 +127,10 @@ def convert_to_at_dc(df):
         return None, None
 
 # -------------------------------------------------
-# DRT Format
+# SG DRT Format (13-column)
 # -------------------------------------------------
-def convert_to_drt_dc(df):
+def convert_to_sg_drt_dc(df: pd.DataFrame):
+    df = df.copy()
     df.columns = df.columns.str.strip().str.lower()
     df = df.dropna(how="all")
     df = df[df["first name as per nric"].notna()]
@@ -143,13 +142,39 @@ def convert_to_drt_dc(df):
         })
         return sanitize_df(df_out), safe_company_name(df)
     except KeyError as e:
-        st.error(f"❌ Missing expected column: {e}")
+        st.error(f"❌ Missing expected column (SG DRT): {e}")
         return None, None
+
+# -------------------------------------------------
+# US DRT Format (11-column; E=First, F=Last)
+# -------------------------------------------------
+def convert_to_us_drt_dc(df: pd.DataFrame):
+    raw = df.dropna(how="all").copy()
+    if raw.shape[1] < 6:
+        st.error("❌ US DRT sheet too narrow — expected ≥ 6 columns (E & F needed).")
+        return None, None
+
+    first = raw.iloc[:, 4]  # Column E (0-based index 4)
+    last  = raw.iloc[:, 5]  # Column F (0-based index 5)
+
+    mask = first.notna() & (first.astype(str).str.strip() != "")
+    first = first[mask].astype(str).str.strip()
+    last  = last[mask].fillna("").astype(str).str.strip()
+
+    df_out = pd.DataFrame({
+        "First Name":    first,
+        "Last Name":     last,
+        "Email Address": ["liangwy@sea.com"] * mask.sum(),
+    })
+
+    # Company may not exist in this layout; use safe fallback
+    return sanitize_df(df_out), "UnknownCompany"
 
 # -------------------------------------------------
 # EQ Format
 # -------------------------------------------------
-def convert_to_eq(df):
+def convert_to_eq(df: pd.DataFrame):
+    df = df.copy()
     df.columns = df.columns.str.strip().str.lower()
     df = df.dropna(how="all")
     df = df[df["first name as per nric"].notna()]
@@ -168,9 +193,10 @@ def convert_to_eq(df):
         return None, None
 
 # -------------------------------------------------
-# STTLY Format
+# STT Loyang Format
 # -------------------------------------------------
-def convert_to_sttly(df):
+def convert_to_sttly(df: pd.DataFrame):
+    df = df.copy()
     df.columns = df.columns.str.strip().str.lower()
     df = df.dropna(how="all")
     df = df[df["full name as per nric"].notna()]
@@ -195,9 +221,10 @@ def convert_to_sttly(df):
         return None, None
 
 # -------------------------------------------------
-# RC Format (replace your existing convert_to_rc with this)
+# Racks Central (RC)
 # -------------------------------------------------
-def convert_to_rc(df, preset_name="Default (as requested)"):
+def convert_to_rc(df: pd.DataFrame, preset_name="Default (as requested)"):
+    df = df.copy()
     df.columns = df.columns.str.strip().str.lower()
     df = df.dropna(how="all")
 
@@ -210,8 +237,6 @@ def convert_to_rc(df, preset_name="Default (as requested)"):
 
     try:
         length = len(df)
-
-        # build columns with NA-safe conversions (no literal "nan")
         name_series = full_name_from(df).fillna("").astype(str).str.strip()
         nric_series = as_str_or_blank(df.get("ic (last 3 digits and suffix) 123a"), length)
         mobile = df.get("mobile number", pd.Series([""] * length)).apply(clean_phone)
@@ -227,8 +252,8 @@ def convert_to_rc(df, preset_name="Default (as requested)"):
             "Visitor Name": name_series,
             "Visitor NRIC/Passport": nric_series,
             "Visitor Email": [preset["Visitor Email"]] * length,
-            "Visitor Contact No": mobile,                      # clean_phone returns '' for NA
-            "Visitor Vehicle Number": plates,                  # no "nan"
+            "Visitor Contact No": mobile,
+            "Visitor Vehicle Number": plates,
             "Visitor Company (UDF)": company,
             "Designation (E.g. Supervisor, Engineer) (UDF)":
                 [preset["Designation (E.g. Supervisor, Engineer) (UDF)"]] * length,
@@ -240,9 +265,7 @@ def convert_to_rc(df, preset_name="Default (as requested)"):
             "Host (UDF)": [preset["Host (UDF)"]] * length,
         })
 
-        # convert NaN/NA/Inf to None for clean Excel blanks
         return sanitize_df(df_out), safe_company_name(df)
-
     except KeyError as e:
         st.error(f"❌ Missing expected column for RC: {e}")
         return None, None
@@ -253,13 +276,17 @@ def convert_to_rc(df, preset_name="Default (as requested)"):
 st.title(" DC Access 🌟 Esther 🌟")
 
 uploaded_file = st.file_uploader("Upload the original visitor list (.xlsx)", type=["xlsx"])
+
 format_type = st.selectbox(
     "Select the Data Center format to convert to",
-    ["AT", 
-     "SG DRT",
-     "EQSG4|SG5|USDA11|USDC15",
-     "STTLY",
-     "RC"]
+    [
+        "AT",
+        "SG DRT",   # 13-col DRT (SIN12/Shopee)
+        "US DRT",   # 11-col DRT (e.g., DFW14)
+        "EQSG4|SG5|USDA11|USDC15",
+        "STTLY",
+        "RC",
+    ]
 )
 
 rc_preset_name = None
@@ -276,7 +303,9 @@ if uploaded_file and format_type:
     if format_type == "AT":
         converted_df, company_name = convert_to_at_dc(df)
     elif format_type == "SG DRT":
-        converted_df, company_name = convert_to_drt_dc(df)
+        converted_df, company_name = convert_to_sg_drt_dc(df)
+    elif format_type == "US DRT":
+        converted_df, company_name = convert_to_us_drt_dc(df)
     elif format_type == "EQSG4|SG5|USDA11|USDC15":
         converted_df, company_name = convert_to_eq(df)
     elif format_type == "STTLY":
@@ -293,7 +322,8 @@ if uploaded_file and format_type:
             engine="xlsxwriter",
             engine_kwargs={"options": {"nan_inf_to_errors": True}}
         ) as writer:
-            sheet = format_type
+            # Excel-safe sheet/tab name (≤ 31 chars)
+            sheet = safe_sheet_name(format_type)
             converted_df.to_excel(writer, index=False, sheet_name=sheet)
             wb = writer.book
             ws = writer.sheets[sheet]
@@ -307,12 +337,15 @@ if uploaded_file and format_type:
                 "border": 1, "align": "center", "valign": "vcenter"
             })
 
+            # Re-write headers with formatting
             for col_idx, col_name in enumerate(converted_df.columns):
                 ws.write(0, col_idx, col_name, header_fmt)
 
+            # Body rows (handle blanks properly)
             for r, row in enumerate(converted_df.itertuples(index=False, name=None), start=1):
                 write_row(ws, r, row, cell_fmt)
 
+            # Autosize columns
             for i, col in enumerate(converted_df.columns):
                 data_max = converted_df[col].astype(str).map(len).max() if not converted_df.empty else 0
                 ws.set_column(i, i, max(len(col), data_max) + 2)
