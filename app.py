@@ -43,13 +43,6 @@ def write_row(ws, r, row_values, cell_fmt):
         else:
             ws.write(r, c, val, cell_fmt)
 
-def make_safe_filename(stem: str, ext: str = ".xlsx") -> str:
-    norm = unicodedata.normalize("NFKD", stem).encode("ascii", "ignore").decode("ascii")
-    norm = norm.replace("-", "_")
-    norm = re.sub(r"[^A-Za-z0-9 _]", "_", norm)
-    norm = re.sub(r"[ _]+", "_", norm).strip("_")
-    return f"{norm}{ext}"
-
 def safe_sheet_name(name: str) -> str:
     name = re.sub(r'[:\\/?*\[\]]', '_', str(name))
     return name[:31] if len(name) > 31 else name
@@ -142,9 +135,9 @@ def convert_to_us_drt_dc(df: pd.DataFrame):
         st.error("❌ US DRT sheet too narrow — expected ≥ 6 columns (need C/E/F).")
         return None, None
 
-    company = raw.iloc[:, 2]
-    first   = raw.iloc[:, 4]
-    last    = raw.iloc[:, 5]
+    company = raw.iloc[:, 2]  # C
+    first   = raw.iloc[:, 4]  # E
+    last    = raw.iloc[:, 5]  # F
 
     mask = first.notna() & (first.astype(str).str.strip() != "")
     first = first[mask].astype(str).str.strip()
@@ -254,6 +247,13 @@ def convert_to_rc(df: pd.DataFrame, preset_name="Default (as requested)"):
         return None, None
 
 def convert_to_cyrusone(df: pd.DataFrame):
+    """
+    CSV export with headers:
+    First Name(required), Middle Name(optional), Last Name(required),
+    Preferred Name(optional), Company(required), Email(optional), Mobile Phone(optional)
+    Email is left blank by request.
+    Supports 11 or 13 column input; pulls C (Company), E (First), F (Last).
+    """
     raw = df.dropna(how="all").copy()
     if raw.shape[1] not in [11, 13]:
         st.error("❌ CyrusOne expects 11-column or 13-column sheet.")
@@ -283,7 +283,7 @@ def convert_to_cyrusone(df: pd.DataFrame):
         "Last Name(required)": last,
         "Preferred Name(optional)": ["" for _ in range(len(first))],
         "Company(required)": company,
-        "Email(optional)": ["liangwy@sea.com" for _ in range(len(first))],
+        "Email(optional)": ["" for _ in range(len(first))],  # left blank per request
         "Mobile Phone(optional)": ["" for _ in range(len(first))],
     })
 
@@ -342,38 +342,55 @@ if uploaded_file and format_type:
     if converted_df is not None:
         date_str = datetime.today().strftime("%Y%m%d")
 
+        # Decide sheet/tab name and filename stem (with spaces)
         if format_type == "SG DRT":
-            sheet = "SGDRT"
-            stem  = f"Upload_DRT_{company_name}_{date_str}"
+            sheet = "SG DRT"
+            stem  = f"Upload SG DRT {company_name} {date_str}"
             file_ext = ".xlsx"
             mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         elif format_type == "US DRT":
             sheet = "US DRT"
-            stem  = f"Upload_DRT_{company_name}_{date_str}"
+            stem  = f"Upload US DRT {company_name} {date_str}"
             file_ext = ".xlsx"
             mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         elif format_type == "EQ (SG4 / SG5 / DA11 / DC15)":
             sheet = "EQ"
-            stem  = f"Upload_EQ_{company_name}_{date_str}"
+            stem  = f"Upload EQ {company_name} {date_str}"
             file_ext = ".xlsx"
             mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         elif format_type == "CyrusOne":
-            sheet = "cyrusone_visitors_template"  # conceptual; CSV has no tabs
+            # CSV has no real tab; we keep the conceptual name for consistency
+            sheet = "cyrusone_visitors_template"
             stem  = f"Upload CyrusOne {company_name} {date_str}"
             file_ext = ".csv"
             mime = "text/csv"
+        elif format_type == "AT":
+            sheet = "AT"
+            stem  = f"Upload AT {company_name} {date_str}"
+            file_ext = ".xlsx"
+            mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        elif format_type == "STTLY":
+            sheet = "STTLY"
+            stem  = f"Upload STTLY {company_name} {date_str}"
+            file_ext = ".xlsx"
+            mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        elif format_type == "RC":
+            sheet = "RC"
+            stem  = f"Upload RC {company_name} {date_str}"
+            file_ext = ".xlsx"
+            mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         else:
             sheet = safe_sheet_name(format_type)
-            stem  = f"Upload_{format_type}_{company_name}_{date_str}"
+            stem  = f"Upload {format_type} {company_name} {date_str}"
             file_ext = ".xlsx"
             mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
-        # Output per type
+        # Output per type (keep spaces in filenames)
         if file_ext == ".csv":
             output = io.BytesIO()
             converted_df.to_csv(output, index=False)
             output.seek(0)
-            fname = f"{stem}{file_ext}"  # keep spaces for CyrusOne
+            fname = f"{stem}{file_ext}"  # keep spaces
             st.success("✅ Conversion completed! Download below:")
             st.download_button(
                 "📥 Download Converted CSV",
@@ -401,15 +418,15 @@ if uploaded_file and format_type:
                     "border": 1, "align": "center", "valign": "vcenter"
                 })
 
-                # style header
+                # header row
                 for col_idx, col_name in enumerate(converted_df.columns):
                     ws.write(0, col_idx, col_name, header_fmt)
 
-                # body rows
+                # data rows
                 for r, row in enumerate(converted_df.itertuples(index=False, name=None), start=1):
                     write_row(ws, r, row, cell_fmt)
 
-                # autosize columns (✅ fixed ternary with else)
+                # autosize columns
                 for i, col in enumerate(converted_df.columns):
                     data_max = (
                         converted_df[col].astype(str).map(len).max()
@@ -420,7 +437,7 @@ if uploaded_file and format_type:
                 ws.set_default_row(18)
 
             output.seek(0)
-            fname = make_safe_filename(stem, file_ext)
+            fname = f"{stem}{file_ext}"  # keep spaces
             st.success("✅ Conversion completed! Download below:")
             st.download_button(
                 "📥 Download Converted Excel",
