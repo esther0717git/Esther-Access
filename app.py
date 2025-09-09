@@ -275,7 +275,7 @@ if uploaded_file and format_type:
 
     if format_type == "SGP AirTrunk (AT)":
         converted_df, company_name = convert_to_at_dc(df)
-    elif format_type == "SGP Digital Realty SIN12 (DRT) - Shopee | USA Digital Realty DFW14":
+    elif format_type == "SGP Digital Realty SIN12 (DRT) - Shopee":
         converted_df, company_name = convert_to_drt_dc(df)
     elif format_type == "SGP Equinix | SG4 | SG5 | USDA11 | USDC15":
         converted_df, company_name = convert_to_eq(df)
