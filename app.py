@@ -40,11 +40,6 @@ def write_row(ws, r, row_values, cell_fmt):
             ws.write(r, c, val, cell_fmt)
 
 def make_safe_filename(stem: str, ext: str = ".xlsx") -> str:
-    """
-    Keep only alphanumeric, space, underscore (no hyphens).
-    Convert any other character (including '-') to underscore.
-    Collapse repeats and trim.
-    """
     norm = unicodedata.normalize("NFKD", stem).encode("ascii", "ignore").decode("ascii")
     norm = norm.replace("-", "_")
     norm = re.sub(r"[^A-Za-z0-9 _]", "_", norm)
@@ -52,12 +47,10 @@ def make_safe_filename(stem: str, ext: str = ".xlsx") -> str:
     return f"{norm}{ext}"
 
 def safe_sheet_name(name: str) -> str:
-    """Excel sheet names must be <= 31 chars and cannot contain : \ / ? * [ ]"""
     name = re.sub(r'[:\\/?*\[\]]', '_', str(name))
     return name[:31] if len(name) > 31 else name
 
 def clean_phone(x, target_len=8):
-    """Return an 8-digit phone from mixed inputs."""
     if pd.isna(x):
         return ""
     if isinstance(x, (int, np.integer)):
@@ -80,7 +73,6 @@ def full_name_from(df: pd.DataFrame) -> pd.Series:
     return (first.fillna("").astype(str) + " " + last.fillna("").astype(str)).str.strip()
 
 def as_str_or_blank(series: pd.Series | None, length: int) -> pd.Series:
-    """Convert a Series to string values but keep missing as '' (never 'nan')."""
     if series is None:
         return pd.Series([""] * length)
     return series.apply(lambda x: "" if pd.isna(x) else str(x))
@@ -169,7 +161,7 @@ def convert_to_us_drt_dc(df: pd.DataFrame):
     return sanitize_df(df_out), company_name
 
 # -------------------------------------------------
-# EQ Format (shared logic)
+# EQ Format
 # -------------------------------------------------
 def convert_to_eq(df: pd.DataFrame):
     df = df.copy()
@@ -319,8 +311,10 @@ if uploaded_file and format_type:
             engine="xlsxwriter",
             engine_kwargs={"options": {"nan_inf_to_errors": True}}
         ) as writer:
-            # Tab name fix for EQ
-            if format_type == "EQ (SG4 / SG5 / DA11 / DC15)":
+            # Tab name overrides
+            if format_type in ["SG DRT", "US DRT"]:
+                sheet = "DRT"
+            elif format_type == "EQ (SG4 / SG5 / DA11 / DC15)":
                 sheet = "EQ"
             else:
                 sheet = safe_sheet_name(format_type)
@@ -353,8 +347,10 @@ if uploaded_file and format_type:
         output.seek(0)
         date_str = datetime.today().strftime("%Y%m%d")
 
-        # File name fix for EQ
-        if format_type == "EQ (SG4 / SG5 / DA11 / DC15)":
+        # Filename overrides
+        if format_type in ["SG DRT", "US DRT"]:
+            stem = f"Upload_DRT_{company_name or 'UnknownCompany'}_{date_str}"
+        elif format_type == "EQ (SG4 / SG5 / DA11 / DC15)":
             stem = f"Upload_EQ_{company_name or 'UnknownCompany'}_{date_str}"
         else:
             stem = f"Upload_{format_type}_{company_name or 'UnknownCompany'}_{date_str}"
@@ -368,4 +364,3 @@ if uploaded_file and format_type:
             file_name=fname,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-
