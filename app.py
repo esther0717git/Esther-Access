@@ -40,6 +40,11 @@ def write_row(ws, r, row_values, cell_fmt):
             ws.write(r, c, val, cell_fmt)
 
 def make_safe_filename(stem: str, ext: str = ".xlsx") -> str:
+    """
+    Keep only alphanumeric, space, underscore (no hyphens).
+    Convert any other character (including '-') to underscore.
+    Collapse repeats and trim.
+    """
     norm = unicodedata.normalize("NFKD", stem).encode("ascii", "ignore").decode("ascii")
     norm = norm.replace("-", "_")
     norm = re.sub(r"[^A-Za-z0-9 _]", "_", norm)
@@ -47,10 +52,12 @@ def make_safe_filename(stem: str, ext: str = ".xlsx") -> str:
     return f"{norm}{ext}"
 
 def safe_sheet_name(name: str) -> str:
+    """Excel sheet names must be <= 31 chars and cannot contain : \\ / ? * [ ]"""
     name = re.sub(r'[:\\/?*\[\]]', '_', str(name))
     return name[:31] if len(name) > 31 else name
 
 def clean_phone(x, target_len=8):
+    """Return an 8-digit phone from mixed inputs."""
     if pd.isna(x):
         return ""
     if isinstance(x, (int, np.integer)):
@@ -73,6 +80,7 @@ def full_name_from(df: pd.DataFrame) -> pd.Series:
     return (first.fillna("").astype(str) + " " + last.fillna("").astype(str)).str.strip()
 
 def as_str_or_blank(series: pd.Series | None, length: int) -> pd.Series:
+    """Convert a Series to string values but keep missing as '' (never 'nan')."""
     if series is None:
         return pd.Series([""] * length)
     return series.apply(lambda x: "" if pd.isna(x) else str(x))
@@ -94,7 +102,7 @@ RC_PRESETS = {
 }
 
 # -------------------------------------------------
-# AT Format
+# Converters
 # -------------------------------------------------
 def convert_to_at_dc(df: pd.DataFrame):
     df = df.copy()
@@ -114,9 +122,6 @@ def convert_to_at_dc(df: pd.DataFrame):
         st.error(f"❌ Missing expected column: {e}")
         return None, None
 
-# -------------------------------------------------
-# SG DRT Format (13-column)
-# -------------------------------------------------
 def convert_to_sg_drt_dc(df: pd.DataFrame):
     df = df.copy()
     df.columns = df.columns.str.strip().str.lower()
@@ -133,9 +138,6 @@ def convert_to_sg_drt_dc(df: pd.DataFrame):
         st.error(f"❌ Missing expected column (SG DRT): {e}")
         return None, None
 
-# -------------------------------------------------
-# US DRT Format (11-column; C=Company, E=First, F=Last)
-# -------------------------------------------------
 def convert_to_us_drt_dc(df: pd.DataFrame):
     raw = df.dropna(how="all").copy()
     if raw.shape[1] < 6:
@@ -160,9 +162,6 @@ def convert_to_us_drt_dc(df: pd.DataFrame):
     company_name = company.iloc[0] if not company.empty else "UnknownCompany"
     return sanitize_df(df_out), company_name
 
-# -------------------------------------------------
-# EQ Format
-# -------------------------------------------------
 def convert_to_eq(df: pd.DataFrame):
     df = df.copy()
     df.columns = df.columns.str.strip().str.lower()
@@ -182,9 +181,6 @@ def convert_to_eq(df: pd.DataFrame):
         st.error(f"❌ Missing expected column: {e}")
         return None, None
 
-# -------------------------------------------------
-# STT Loyang Format
-# -------------------------------------------------
 def convert_to_sttly(df: pd.DataFrame):
     df = df.copy()
     df.columns = df.columns.str.strip().str.lower()
@@ -210,9 +206,6 @@ def convert_to_sttly(df: pd.DataFrame):
         st.error(f"❌ Missing expected column: {e}")
         return None, None
 
-# -------------------------------------------------
-# Racks Central (RC)
-# -------------------------------------------------
 def convert_to_rc(df: pd.DataFrame, preset_name="Default (as requested)"):
     df = df.copy()
     df.columns = df.columns.str.strip().str.lower()
@@ -259,6 +252,53 @@ def convert_to_rc(df: pd.DataFrame, preset_name="Default (as requested)"):
         st.error(f"❌ Missing expected column for RC: {e}")
         return None, None
 
+def convert_to_cyrusone(df: pd.DataFrame):
+    """
+    Supports 11-column or 13-column sheets.
+    Required fields (non-empty after trimming):
+      - Column C (index 2): Company
+      - Column E (index 4): First Name
+      - Column F (index 5): Last Name
+    Outputs CSV with CyrusOne template headers; Email auto-filled.
+    """
+    raw = df.dropna(how="all").copy()
+    if raw.shape[1] not in [11, 13]:
+        st.error("❌ CyrusOne expects 11-column or 13-column sheet.")
+        return None, None
+
+    company = raw.iloc[:, 2]  # C
+    first   = raw.iloc[:, 4]  # E
+    last    = raw.iloc[:, 5]  # F
+
+    # Enforce all required values
+    mask = (
+        first.notna() & (first.astype(str).str.strip() != "") &
+        last.notna()  & (last.astype(str).str.strip()  != "") &
+        company.notna() & (company.astype(str).str.strip() != "")
+    )
+
+    first   = first[mask].astype(str).str.strip()
+    last    = last[mask].astype(str).str.strip()
+    company = company[mask].astype(str).str.strip()
+
+    if first.empty:
+        st.error("❌ CyrusOne: no valid rows found (check columns C, E, F).")
+        return None, None
+
+    # Exact CyrusOne headers (7 columns), Email auto-filled
+    df_out = pd.DataFrame({
+        "First Name(required)": first,
+        "Middle Name(optional)": ["" for _ in range(len(first))],
+        "Last Name(required)": last,
+        "Preferred Name(optional)": ["" for _ in range(len(first))],
+        "Company(required)": company,
+        "Email(optional)": ["liangwy@sea.com" for _ in range(len(first))],
+        "Mobile Phone(optional)": ["" for _ in range(len(first))],
+    })
+
+    company_name = company.iloc[0] if not company.empty else "UnknownCompany"
+    return sanitize_df(df_out), company_name
+
 # -------------------------------------------------
 # App UI
 # -------------------------------------------------
@@ -275,6 +315,7 @@ format_type = st.selectbox(
         "EQ (SG4 / SG5 / DA11 / DC15)",
         "STTLY",
         "RC",
+        "CyrusOne",
     ]
 )
 
@@ -301,66 +342,87 @@ if uploaded_file and format_type:
         converted_df, company_name = convert_to_sttly(df)
     elif format_type == "RC":
         converted_df, company_name = convert_to_rc(df, preset_name=rc_preset_name)
+    elif format_type == "CyrusOne":
+        converted_df, company_name = convert_to_cyrusone(df)
     else:
         converted_df, company_name = None, None
 
     if converted_df is not None:
-        output = io.BytesIO()
-        with pd.ExcelWriter(
-            output,
-            engine="xlsxwriter",
-            engine_kwargs={"options": {"nan_inf_to_errors": True}}
-        ) as writer:
-            # Tab name overrides
-            if format_type in ["SG DRT", "US DRT"]:
-                sheet = "DRT"
-            elif format_type == "EQ (SG4 / SG5 / DA11 / DC15)":
-                sheet = "EQ"
-            else:
-                sheet = safe_sheet_name(format_type)
-
-            converted_df.to_excel(writer, index=False, sheet_name=sheet)
-            wb = writer.book
-            ws = writer.sheets[sheet]
-
-            header_fmt = wb.add_format({
-                "bold": True, "border": 1,
-                "align": "center", "valign": "vcenter",
-                "bg_color": "#548135", "font_color": "white"
-            })
-            cell_fmt = wb.add_format({
-                "border": 1, "align": "center", "valign": "vcenter"
-            })
-
-            for col_idx, col_name in enumerate(converted_df.columns):
-                ws.write(0, col_idx, col_name, header_fmt)
-
-            for r, row in enumerate(converted_df.itertuples(index=False, name=None), start=1):
-                write_row(ws, r, row, cell_fmt)
-
-            for i, col in enumerate(converted_df.columns):
-                data_max = converted_df[col].astype(str).map(len).max() if not converted_df.empty else 0
-                ws.set_column(i, i, max(len(col), data_max) + 2)
-
-            ws.set_default_row(18)
-
-        output.seek(0)
         date_str = datetime.today().strftime("%Y%m%d")
 
-        # Filename overrides
+        # Per-format tab/filename + export type
         if format_type in ["SG DRT", "US DRT"]:
-            stem = f"Upload_DRT_{company_name or 'UnknownCompany'}_{date_str}"
+            sheet = "DRT"
+            stem  = f"Upload_DRT_{company_name or 'UnknownCompany'}_{date_str}"
+            file_ext = ".xlsx"
+            mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         elif format_type == "EQ (SG4 / SG5 / DA11 / DC15)":
-            stem = f"Upload_EQ_{company_name or 'UnknownCompany'}_{date_str}"
+            sheet = "EQ"
+            stem  = f"Upload_EQ_{company_name or 'UnknownCompany'}_{date_str}"
+            file_ext = ".xlsx"
+            mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        elif format_type == "CyrusOne":
+            sheet = "cyrusone_visitors_template"  # conceptual; CSV has no tabs
+            stem  = f"Upload_CyrusOne_{company_name or 'UnknownCompany'}_{date_str}"
+            file_ext = ".csv"
+            mime = "text/csv"
         else:
-            stem = f"Upload_{format_type}_{company_name or 'UnknownCompany'}_{date_str}"
+            sheet = safe_sheet_name(format_type)
+            stem  = f"Upload_{format_type}_{company_name or 'UnknownCompany'}_{date_str}"
+            file_ext = ".xlsx"
+            mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
-        fname = make_safe_filename(stem, ".xlsx")
+        # Output
+        if file_ext == ".csv":
+            output = io.BytesIO()
+            converted_df.to_csv(output, index=False)
+            output.seek(0)
+            fname = make_safe_filename(stem, file_ext)
+            st.success("✅ Conversion completed! Download below:")
+            st.download_button(
+                "📥 Download Converted CSV",
+                data=output,
+                file_name=fname,
+                mime=mime
+            )
+        else:
+            output = io.BytesIO()
+            with pd.ExcelWriter(
+                output,
+                engine="xlsxwriter",
+                engine_kwargs={"options": {"nan_inf_to_errors": True}}
+            ) as writer:
+                converted_df.to_excel(writer, index=False, sheet_name=sheet)
+                wb = writer.book
+                ws = writer.sheets[sheet]
 
-        st.success("✅ Conversion completed! Download below:")
-        st.download_button(
-            "📥 Download Converted Excel",
-            data=output,
-            file_name=fname,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+                header_fmt = wb.add_format({
+                    "bold": True, "border": 1,
+                    "align": "center", "valign": "vcenter",
+                    "bg_color": "#548135", "font_color": "white"
+                })
+                cell_fmt = wb.add_format({
+                    "border": 1, "align": "center", "valign": "vcenter"
+                })
+
+                for col_idx, col_name in enumerate(converted_df.columns):
+                    ws.write(0, col_idx, col_name, header_fmt)
+
+                for r, row in enumerate(converted_df.itertuples(index=False, name=None), start=1):
+                    write_row(ws, r, row, cell_fmt)
+
+                for i, col in enumerate(converted_df.columns):
+                    data_max = converted_df[col].astype(str).map(len).max() if not converted_df.empty else 0
+                    ws.set_column(i, i, max(len(col), data_max) + 2)
+
+                ws.set_default_row(18)
+
+            output.seek(0)
+            fname = make_safe_filename(stem, file_ext)
+            st.success("✅ Conversion completed! Download below:")
+            st.download_button(
+                "📥 Download Converted Excel",
+                data=output,
+                file_name=fname,
+                mime=mime
+            )
