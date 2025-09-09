@@ -374,7 +374,7 @@ if uploaded_file and format_type:
         elif format_type == "CyrusOne":
             sheet = "cyrusone_visitors_template"  # exact worksheet/tab name
             stem  = f"Upload CyrusOne {company_name} {date_str}"
-            file_ext = ".xlsx"  # XLSX so tab name is honored
+            file_ext = ".xlsx"  # XLSX to control tab
             mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         elif format_type == "AT":
             sheet = "AT"
@@ -397,7 +397,7 @@ if uploaded_file and format_type:
             file_ext = ".xlsx"
             mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
-        # Output (Excel for all, including CyrusOne now)
+        # Output (Excel for all)
         output = io.BytesIO()
         with pd.ExcelWriter(
             output,
@@ -408,11 +408,27 @@ if uploaded_file and format_type:
             wb = writer.book
             ws = writer.sheets[sheet]
 
-            header_fmt = wb.add_format({
-                "bold": True, "border": 1,
-                "align": "center", "valign": "vcenter",
-                "bg_color": "#548135", "font_color": "white"
-            })
+            # --- Conditional header style ---
+            if format_type == "CyrusOne":
+                # Non-bold, no background, Calibri 11
+                header_fmt = wb.add_format({
+                    "bold": False,
+                    "font_name": "Calibri",
+                    "font_size": 11,
+                    "border": 1,
+                    "align": "center",
+                    "valign": "vcenter",
+                })
+            else:
+                header_fmt = wb.add_format({
+                    "bold": True,
+                    "border": 1,
+                    "align": "center",
+                    "valign": "vcenter",
+                    "bg_color": "#548135",
+                    "font_color": "white"
+                })
+
             cell_fmt = wb.add_format({
                 "border": 1, "align": "center", "valign": "vcenter"
             })
@@ -436,7 +452,7 @@ if uploaded_file and format_type:
             ws.set_default_row(18)
 
         output.seek(0)
-        fname = f"{stem}{file_ext}"  # keep spaces in the filename
+        fname = f"{stem}{file_ext}"  # keep spaces
         st.success("✅ Conversion completed! Download below:")
         st.download_button(
             "📥 Download Converted Excel",
