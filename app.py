@@ -248,7 +248,7 @@ def convert_to_rc(df: pd.DataFrame, preset_name="Default (as requested)"):
 
 def convert_to_cyrusone(df: pd.DataFrame):
     """
-    CSV export with headers:
+    Export with headers:
     First Name(required), Middle Name(optional), Last Name(required),
     Preferred Name(optional), Company(required), Email(optional), Mobile Phone(optional)
     Email is left blank by request.
@@ -283,7 +283,7 @@ def convert_to_cyrusone(df: pd.DataFrame):
         "Last Name(required)": last,
         "Preferred Name(optional)": ["" for _ in range(len(first))],
         "Company(required)": company,
-        "Email(optional)": ["" for _ in range(len(first))],  # left blank per request
+        "Email(optional)": ["" for _ in range(len(first))],  # left blank
         "Mobile Phone(optional)": ["" for _ in range(len(first))],
     })
 
@@ -359,11 +359,11 @@ if uploaded_file and format_type:
             file_ext = ".xlsx"
             mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         elif format_type == "CyrusOne":
-            # CSV has no real tab; we keep the conceptual name for consistency
-            sheet = "cyrusone_visitors_template"
+            # Export XLSX so we can enforce the exact tab name
+            sheet = "cyrusone_visitors_template"  # exact worksheet/tab name
             stem  = f"Upload CyrusOne {company_name} {date_str}"
-            file_ext = ".csv"
-            mime = "text/csv"
+            file_ext = ".xlsx"
+            mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         elif format_type == "AT":
             sheet = "AT"
             stem  = f"Upload AT {company_name} {date_str}"
@@ -385,63 +385,50 @@ if uploaded_file and format_type:
             file_ext = ".xlsx"
             mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
-        # Output per type (keep spaces in filenames)
-        if file_ext == ".csv":
-            output = io.BytesIO()
-            converted_df.to_csv(output, index=False)
-            output.seek(0)
-            fname = f"{stem}{file_ext}"  # keep spaces
-            st.success("✅ Conversion completed! Download below:")
-            st.download_button(
-                "📥 Download Converted CSV",
-                data=output,
-                file_name=fname,
-                mime=mime
-            )
-        else:
-            output = io.BytesIO()
-            with pd.ExcelWriter(
-                output,
-                engine="xlsxwriter",
-                engine_kwargs={"options": {"nan_inf_to_errors": True}}
-            ) as writer:
-                converted_df.to_excel(writer, index=False, sheet_name=sheet)
-                wb = writer.book
-                ws = writer.sheets[sheet]
+        # Output (Excel for all, including CyrusOne now)
+        output = io.BytesIO()
+        with pd.ExcelWriter(
+            output,
+            engine="xlsxwriter",
+            engine_kwargs={"options": {"nan_inf_to_errors": True}}
+        ) as writer:
+            converted_df.to_excel(writer, index=False, sheet_name=sheet)
+            wb = writer.book
+            ws = writer.sheets[sheet]
 
-                header_fmt = wb.add_format({
-                    "bold": True, "border": 1,
-                    "align": "center", "valign": "vcenter",
-                    "bg_color": "#548135", "font_color": "white"
-                })
-                cell_fmt = wb.add_format({
-                    "border": 1, "align": "center", "valign": "vcenter"
-                })
+            header_fmt = wb.add_format({
+                "bold": True, "border": 1,
+                "align": "center", "valign": "vcenter",
+                "bg_color": "#548135", "font_color": "white"
+            })
+            cell_fmt = wb.add_format({
+                "border": 1, "align": "center", "valign": "vcenter"
+            })
 
-                # header row
-                for col_idx, col_name in enumerate(converted_df.columns):
-                    ws.write(0, col_idx, col_name, header_fmt)
+            # header row
+            for col_idx, col_name in enumerate(converted_df.columns):
+                ws.write(0, col_idx, col_name, header_fmt)
 
-                # data rows
-                for r, row in enumerate(converted_df.itertuples(index=False, name=None), start=1):
-                    write_row(ws, r, row, cell_fmt)
+            # data rows
+            for r, row in enumerate(converted_df.itertuples(index=False, name=None), start=1):
+                write_row(ws, r, row, cell_fmt)
 
-                # autosize columns
-                for i, col in enumerate(converted_df.columns):
-                    data_max = (
-                        converted_df[col].astype(str).map(len).max()
-                        if not converted_df.empty else 0
-                    )
-                    ws.set_column(i, i, max(len(col), data_max) + 2)
+            # autosize columns
+            for i, col in enumerate(converted_df.columns):
+                data_max = (
+                    converted_df[col].astype(str).map(len).max()
+                    if not converted_df.empty else 0
+                )
+                ws.set_column(i, i, max(len(col), data_max) + 2)
 
-                ws.set_default_row(18)
+            ws.set_default_row(18)
 
-            output.seek(0)
-            fname = f"{stem}{file_ext}"  # keep spaces
-            st.success("✅ Conversion completed! Download below:")
-            st.download_button(
-                "📥 Download Converted Excel",
-                data=output,
-                file_name=fname,
-                mime=mime
-            )
+        output.seek(0)
+        fname = f"{stem}{file_ext}"  # keep spaces
+        st.success("✅ Conversion completed! Download below:")
+        st.download_button(
+            "📥 Download Converted Excel",
+            data=output,
+            file_name=fname,
+            mime=mime
+        )
