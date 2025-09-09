@@ -23,12 +23,16 @@ def safe_company_name(df: pd.DataFrame) -> str:
             return str(co_series.iloc[0])
     return "UnknownCompany"
 
+def first_word_company(name: str) -> str:
+    """Return only the first word of a company name."""
+    if not name or not isinstance(name, str):
+        return "UnknownCompany"
+    return name.strip().split()[0]
+
 def sanitize_df(df: pd.DataFrame) -> pd.DataFrame:
-    """Replace NaN/NA/Inf with None so we can write clean blanks to Excel."""
     return df.replace({pd.NA: None, np.nan: None, np.inf: None, -np.inf: None})
 
 def write_row(ws, r, row_values, cell_fmt):
-    """Write a row, using write_blank() for None/NaN/Inf."""
     for c, val in enumerate(row_values):
         is_blank = (
             val is None
@@ -40,11 +44,6 @@ def write_row(ws, r, row_values, cell_fmt):
             ws.write(r, c, val, cell_fmt)
 
 def make_safe_filename(stem: str, ext: str = ".xlsx") -> str:
-    """
-    Keep only alphanumeric, space, underscore (no hyphens).
-    Convert any other character (including '-') to underscore.
-    Collapse repeats and trim.
-    """
     norm = unicodedata.normalize("NFKD", stem).encode("ascii", "ignore").decode("ascii")
     norm = norm.replace("-", "_")
     norm = re.sub(r"[^A-Za-z0-9 _]", "_", norm)
@@ -52,12 +51,10 @@ def make_safe_filename(stem: str, ext: str = ".xlsx") -> str:
     return f"{norm}{ext}"
 
 def safe_sheet_name(name: str) -> str:
-    """Excel sheet names must be <= 31 chars and cannot contain : \\ / ? * [ ]"""
     name = re.sub(r'[:\\/?*\[\]]', '_', str(name))
     return name[:31] if len(name) > 31 else name
 
 def clean_phone(x, target_len=8):
-    """Return an 8-digit phone from mixed inputs."""
     if pd.isna(x):
         return ""
     if isinstance(x, (int, np.integer)):
@@ -80,7 +77,6 @@ def full_name_from(df: pd.DataFrame) -> pd.Series:
     return (first.fillna("").astype(str) + " " + last.fillna("").astype(str)).str.strip()
 
 def as_str_or_blank(series: pd.Series | None, length: int) -> pd.Series:
-    """Convert a Series to string values but keep missing as '' (never 'nan')."""
     if series is None:
         return pd.Series([""] * length)
     return series.apply(lambda x: "" if pd.isna(x) else str(x))
@@ -117,7 +113,8 @@ def convert_to_at_dc(df: pd.DataFrame):
             "Company":           df["company full name"],
             "Other IC Number":   df["ic (last 3 digits and suffix) 123a"]
         })
-        return sanitize_df(df_out), safe_company_name(df)
+        company_name = first_word_company(safe_company_name(df))
+        return sanitize_df(df_out), company_name
     except KeyError as e:
         st.error(f"❌ Missing expected column: {e}")
         return None, None
@@ -133,7 +130,8 @@ def convert_to_sg_drt_dc(df: pd.DataFrame):
             "Last Name":     df["middle and last name as per nric"],
             "Email Address": ["liangwy@sea.com"] * len(df),
         })
-        return sanitize_df(df_out), safe_company_name(df)
+        company_name = first_word_company(safe_company_name(df))
+        return sanitize_df(df_out), company_name
     except KeyError as e:
         st.error(f"❌ Missing expected column (SG DRT): {e}")
         return None, None
@@ -144,9 +142,9 @@ def convert_to_us_drt_dc(df: pd.DataFrame):
         st.error("❌ US DRT sheet too narrow — expected ≥ 6 columns (need C/E/F).")
         return None, None
 
-    company = raw.iloc[:, 2]   # Column C
-    first   = raw.iloc[:, 4]   # Column E
-    last    = raw.iloc[:, 5]   # Column F
+    company = raw.iloc[:, 2]
+    first   = raw.iloc[:, 4]
+    last    = raw.iloc[:, 5]
 
     mask = first.notna() & (first.astype(str).str.strip() != "")
     first = first[mask].astype(str).str.strip()
@@ -159,7 +157,7 @@ def convert_to_us_drt_dc(df: pd.DataFrame):
         "Email Address": ["liangwy@sea.com"] * mask.sum(),
     })
 
-    company_name = company.iloc[0] if not company.empty else "UnknownCompany"
+    company_name = first_word_company(company.iloc[0] if not company.empty else "UnknownCompany")
     return sanitize_df(df_out), company_name
 
 def convert_to_eq(df: pd.DataFrame):
@@ -176,7 +174,8 @@ def convert_to_eq(df: pd.DataFrame):
             "Country Code (Optional)": ["" for _ in range(len(df))],
             "Mobile Phone (Optional)": ["" for _ in range(len(df))]
         })
-        return sanitize_df(df_out), safe_company_name(df)
+        company_name = first_word_company(safe_company_name(df))
+        return sanitize_df(df_out), company_name
     except KeyError as e:
         st.error(f"❌ Missing expected column: {e}")
         return None, None
@@ -201,7 +200,8 @@ def convert_to_sttly(df: pd.DataFrame):
             "Business Phone* (If your number is not local, please input IDD Code without the +)":
                 mobile.apply(clean_phone),
         })
-        return sanitize_df(df_out), safe_company_name(df)
+        company_name = first_word_company(safe_company_name(df))
+        return sanitize_df(df_out), company_name
     except KeyError as e:
         st.error(f"❌ Missing expected column: {e}")
         return None, None
@@ -247,30 +247,22 @@ def convert_to_rc(df: pd.DataFrame, preset_name="Default (as requested)"):
             "Host (UDF)": [preset["Host (UDF)"]] * length,
         })
 
-        return sanitize_df(df_out), safe_company_name(df)
+        company_name = first_word_company(safe_company_name(df))
+        return sanitize_df(df_out), company_name
     except KeyError as e:
         st.error(f"❌ Missing expected column for RC: {e}")
         return None, None
 
 def convert_to_cyrusone(df: pd.DataFrame):
-    """
-    Supports 11-column or 13-column sheets.
-    Required fields (non-empty after trimming):
-      - Column C (index 2): Company
-      - Column E (index 4): First Name
-      - Column F (index 5): Last Name
-    Outputs CSV with CyrusOne template headers; Email auto-filled.
-    """
     raw = df.dropna(how="all").copy()
     if raw.shape[1] not in [11, 13]:
         st.error("❌ CyrusOne expects 11-column or 13-column sheet.")
         return None, None
 
-    company = raw.iloc[:, 2]  # C
-    first   = raw.iloc[:, 4]  # E
-    last    = raw.iloc[:, 5]  # F
+    company = raw.iloc[:, 2]
+    first   = raw.iloc[:, 4]
+    last    = raw.iloc[:, 5]
 
-    # Enforce all required values
     mask = (
         first.notna() & (first.astype(str).str.strip() != "") &
         last.notna()  & (last.astype(str).str.strip()  != "") &
@@ -285,7 +277,6 @@ def convert_to_cyrusone(df: pd.DataFrame):
         st.error("❌ CyrusOne: no valid rows found (check columns C, E, F).")
         return None, None
 
-    # Exact CyrusOne headers (7 columns), Email auto-filled
     df_out = pd.DataFrame({
         "First Name(required)": first,
         "Middle Name(optional)": ["" for _ in range(len(first))],
@@ -297,6 +288,7 @@ def convert_to_cyrusone(df: pd.DataFrame):
     })
 
     company_name = company.iloc[0] if not company.empty else "UnknownCompany"
+    company_name = first_word_company(company_name)
     return sanitize_df(df_out), company_name
 
 # -------------------------------------------------
@@ -350,34 +342,37 @@ if uploaded_file and format_type:
     if converted_df is not None:
         date_str = datetime.today().strftime("%Y%m%d")
 
-        # Per-format tab/filename + export type
-        if format_type in ["SG DRT", "US DRT"]:
-            sheet = "DRT"
-            stem  = f"Upload_DRT_{company_name or 'UnknownCompany'}_{date_str}"
+        if format_type == "SG DRT":
+            sheet = "SGDRT"
+            stem  = f"Upload_DRT_{company_name}_{date_str}"
+            file_ext = ".xlsx"
+            mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        elif format_type == "US DRT":
+            sheet = "US DRT"
+            stem  = f"Upload_DRT_{company_name}_{date_str}"
             file_ext = ".xlsx"
             mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         elif format_type == "EQ (SG4 / SG5 / DA11 / DC15)":
             sheet = "EQ"
-            stem  = f"Upload_EQ_{company_name or 'UnknownCompany'}_{date_str}"
+            stem  = f"Upload_EQ_{company_name}_{date_str}"
             file_ext = ".xlsx"
             mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         elif format_type == "CyrusOne":
-            sheet = "cyrusone_visitors_template"  # conceptual; CSV has no tabs
-            stem  = f"Upload_CyrusOne_{company_name or 'UnknownCompany'}_{date_str}"
+            sheet = "cyrusone_visitors_template"
+            stem  = f"Upload CyrusOne {company_name} {date_str}"
             file_ext = ".csv"
             mime = "text/csv"
         else:
             sheet = safe_sheet_name(format_type)
-            stem  = f"Upload_{format_type}_{company_name or 'UnknownCompany'}_{date_str}"
+            stem  = f"Upload_{format_type}_{company_name}_{date_str}"
             file_ext = ".xlsx"
             mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
-        # Output
         if file_ext == ".csv":
             output = io.BytesIO()
             converted_df.to_csv(output, index=False)
             output.seek(0)
-            fname = make_safe_filename(stem, file_ext)
+            fname = f"{stem}{file_ext}"  # keep spaces
             st.success("✅ Conversion completed! Download below:")
             st.download_button(
                 "📥 Download Converted CSV",
@@ -412,17 +407,4 @@ if uploaded_file and format_type:
                     write_row(ws, r, row, cell_fmt)
 
                 for i, col in enumerate(converted_df.columns):
-                    data_max = converted_df[col].astype(str).map(len).max() if not converted_df.empty else 0
-                    ws.set_column(i, i, max(len(col), data_max) + 2)
-
-                ws.set_default_row(18)
-
-            output.seek(0)
-            fname = make_safe_filename(stem, file_ext)
-            st.success("✅ Conversion completed! Download below:")
-            st.download_button(
-                "📥 Download Converted Excel",
-                data=output,
-                file_name=fname,
-                mime=mime
-            )
+                    data_max = converted_df[col].astype(str).map(len).max() if not converted_df.empty
