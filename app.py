@@ -4,13 +4,25 @@ import numpy as np
 import io
 import math
 import re
-import unicodedata
 from datetime import datetime
 
 # -------------------------------------------------
 # Streamlit page config
 # -------------------------------------------------
 st.set_page_config(page_title="Data Center Format Converter 🌟 Esther", layout="centered")
+
+# -------------------------------------------------
+# Constants
+# -------------------------------------------------
+CYRUSONE_HEADERS = [
+    "First Name(required)",
+    "Middle Name(optional)",
+    "Last Name(required)",
+    "Preferred Name(optional)",
+    "Company(required)",
+    "Email(optional)",
+    "Mobile Phone(optional)",
+]
 
 # -------------------------------------------------
 # Helpers
@@ -24,7 +36,6 @@ def safe_company_name(df: pd.DataFrame) -> str:
     return "UnknownCompany"
 
 def first_word_company(name: str) -> str:
-    """Return only the first word of a company name."""
     if not name or not isinstance(name, str):
         return "UnknownCompany"
     return name.strip().split()[0]
@@ -248,10 +259,9 @@ def convert_to_rc(df: pd.DataFrame, preset_name="Default (as requested)"):
 
 def convert_to_cyrusone(df: pd.DataFrame):
     """
-    Export with headers:
-    First Name(required), Middle Name(optional), Last Name(required),
-    Preferred Name(optional), Company(required), Email(optional), Mobile Phone(optional)
-    Email is left blank by request.
+    XLSX export; tab name 'cyrusone_visitors_template'.
+    Headers enforced exactly via CYRUSONE_HEADERS.
+    Email remains blank.
     Supports 11 or 13 column input; pulls C (Company), E (First), F (Last).
     """
     raw = df.dropna(how="all").copy()
@@ -283,9 +293,12 @@ def convert_to_cyrusone(df: pd.DataFrame):
         "Last Name(required)": last,
         "Preferred Name(optional)": ["" for _ in range(len(first))],
         "Company(required)": company,
-        "Email(optional)": ["" for _ in range(len(first))],  # left blank
+        "Email(optional)": ["" for _ in range(len(first))],
         "Mobile Phone(optional)": ["" for _ in range(len(first))],
     })
+
+    # Enforce exact header order & names
+    df_out = df_out.reindex(columns=CYRUSONE_HEADERS)
 
     company_name = company.iloc[0] if not company.empty else "UnknownCompany"
     company_name = first_word_company(company_name)
@@ -359,10 +372,9 @@ if uploaded_file and format_type:
             file_ext = ".xlsx"
             mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         elif format_type == "CyrusOne":
-            # Export XLSX so we can enforce the exact tab name
             sheet = "cyrusone_visitors_template"  # exact worksheet/tab name
             stem  = f"Upload CyrusOne {company_name} {date_str}"
-            file_ext = ".xlsx"
+            file_ext = ".xlsx"  # XLSX so tab name is honored
             mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         elif format_type == "AT":
             sheet = "AT"
@@ -424,7 +436,7 @@ if uploaded_file and format_type:
             ws.set_default_row(18)
 
         output.seek(0)
-        fname = f"{stem}{file_ext}"  # keep spaces
+        fname = f"{stem}{file_ext}"  # keep spaces in the filename
         st.success("✅ Conversion completed! Download below:")
         st.download_button(
             "📥 Download Converted Excel",
