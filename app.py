@@ -255,11 +255,11 @@ st.title(" DC Access 🌟 Esther 🌟")
 uploaded_file = st.file_uploader("Upload the original visitor list (.xlsx)", type=["xlsx"])
 format_type = st.selectbox(
     "Select the Data Center format to convert to",
-    ["SGP AirTrunk (AT)", 
-     "SGP Digital Realty SIN12 (DRT) - Shopee",
-     "SGP Equinix | SG4 | SG5 | USDA11 | USDC15",
-     "SGP STT Loyang (LY)",
-     "SGP Racks Central (RC)"]
+    ["AT", 
+     "DRT",
+     "EQSG4|SG5|USDA11|USDC15",
+     "STTLY",
+     "RC"]
 )
 
 rc_preset_name = None
@@ -273,15 +273,15 @@ if format_type == "RC":
 if uploaded_file and format_type:
     df = pd.read_excel(uploaded_file)
 
-    if format_type == "SGP AirTrunk (AT)":
+    if format_type == "AT":
         converted_df, company_name = convert_to_at_dc(df)
-    elif format_type == "SGP Digital Realty SIN12 (DRT) - Shopee":
+    elif format_type == "DRT":
         converted_df, company_name = convert_to_drt_dc(df)
-    elif format_type == "SGP Equinix | SG4 | SG5 | USDA11 | USDC15":
+    elif format_type == "EQSG4|SG5|USDA11|USDC15":
         converted_df, company_name = convert_to_eq(df)
-    elif format_type == "SGP STT Loyang (LY)":
+    elif format_type == "STTLY":
         converted_df, company_name = convert_to_sttly(df)
-    elif format_type == "SGP Racks Central (RC)":
+    elif format_type == "RC":
         converted_df, company_name = convert_to_rc(df, preset_name=rc_preset_name)
     else:
         converted_df, company_name = None, None
