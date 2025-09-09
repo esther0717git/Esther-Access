@@ -57,11 +57,7 @@ def safe_sheet_name(name: str) -> str:
     return name[:31] if len(name) > 31 else name
 
 def clean_phone(x, target_len=8):
-    """Return an 8-digit phone from mixed inputs.
-    - Handles floats like 86984997.0 without adding a trailing 0
-    - Strips all non-digits
-    - If longer than target_len, keep the LAST target_len digits
-    """
+    """Return an 8-digit phone from mixed inputs."""
     if pd.isna(x):
         return ""
     if isinstance(x, (int, np.integer)):
@@ -146,20 +142,22 @@ def convert_to_sg_drt_dc(df: pd.DataFrame):
         return None, None
 
 # -------------------------------------------------
-# US DRT Format (11-column; E=First, F=Last)
+# US DRT Format (11-column; C=Company, E=First, F=Last)
 # -------------------------------------------------
 def convert_to_us_drt_dc(df: pd.DataFrame):
     raw = df.dropna(how="all").copy()
     if raw.shape[1] < 6:
-        st.error("❌ US DRT sheet too narrow — expected ≥ 6 columns (E & F needed).")
+        st.error("❌ US DRT sheet too narrow — expected ≥ 6 columns (need C/E/F).")
         return None, None
 
-    first = raw.iloc[:, 4]  # Column E (0-based index 4)
-    last  = raw.iloc[:, 5]  # Column F (0-based index 5)
+    company = raw.iloc[:, 2]   # Column C
+    first   = raw.iloc[:, 4]   # Column E
+    last    = raw.iloc[:, 5]   # Column F
 
     mask = first.notna() & (first.astype(str).str.strip() != "")
     first = first[mask].astype(str).str.strip()
-    last  = last[mask].fillna("").astype(str).str.strip()
+    last = last[mask].fillna("").astype(str).str.strip()
+    company = company[mask].fillna("").astype(str).str.strip()
 
     df_out = pd.DataFrame({
         "First Name":    first,
@@ -167,11 +165,11 @@ def convert_to_us_drt_dc(df: pd.DataFrame):
         "Email Address": ["liangwy@sea.com"] * mask.sum(),
     })
 
-    # Company may not exist in this layout; use safe fallback
-    return sanitize_df(df_out), "UnknownCompany"
+    company_name = company.iloc[0] if not company.empty else "UnknownCompany"
+    return sanitize_df(df_out), company_name
 
 # -------------------------------------------------
-# EQ Format
+# EQ Format (shared logic)
 # -------------------------------------------------
 def convert_to_eq(df: pd.DataFrame):
     df = df.copy()
@@ -228,7 +226,6 @@ def convert_to_rc(df: pd.DataFrame, preset_name="Default (as requested)"):
     df.columns = df.columns.str.strip().str.lower()
     df = df.dropna(how="all")
 
-    # keep only rows with a non-empty name
     initial_names = full_name_from(df)
     mask = initial_names.notna() & (initial_names.astype(str).str.strip() != "")
     df = df[mask].copy()
@@ -281,9 +278,12 @@ format_type = st.selectbox(
     "Select the Data Center format to convert to",
     [
         "AT",
-        "SG DRT",   # 13-col DRT (SIN12/Shopee)
-        "US DRT",   # 11-col DRT (e.g., DFW14)
-        "EQSG4|SG5|USDA11|USDC15",
+        "SG DRT",   # 13-col
+        "US DRT",   # 11-col
+        "EQ SG4",
+        "EQ SG5",
+        "EQ USDA11",
+        "EQ USDC15",
         "STTLY",
         "RC",
     ]
@@ -306,7 +306,7 @@ if uploaded_file and format_type:
         converted_df, company_name = convert_to_sg_drt_dc(df)
     elif format_type == "US DRT":
         converted_df, company_name = convert_to_us_drt_dc(df)
-    elif format_type == "EQSG4|SG5|USDA11|USDC15":
+    elif format_type in ["EQ SG4", "EQ SG5", "EQ USDA11", "EQ USDC15"]:
         converted_df, company_name = convert_to_eq(df)
     elif format_type == "STTLY":
         converted_df, company_name = convert_to_sttly(df)
@@ -322,7 +322,6 @@ if uploaded_file and format_type:
             engine="xlsxwriter",
             engine_kwargs={"options": {"nan_inf_to_errors": True}}
         ) as writer:
-            # Excel-safe sheet/tab name (≤ 31 chars)
             sheet = safe_sheet_name(format_type)
             converted_df.to_excel(writer, index=False, sheet_name=sheet)
             wb = writer.book
@@ -337,15 +336,12 @@ if uploaded_file and format_type:
                 "border": 1, "align": "center", "valign": "vcenter"
             })
 
-            # Re-write headers with formatting
             for col_idx, col_name in enumerate(converted_df.columns):
                 ws.write(0, col_idx, col_name, header_fmt)
 
-            # Body rows (handle blanks properly)
             for r, row in enumerate(converted_df.itertuples(index=False, name=None), start=1):
                 write_row(ws, r, row, cell_fmt)
 
-            # Autosize columns
             for i, col in enumerate(converted_df.columns):
                 data_max = converted_df[col].astype(str).map(len).max() if not converted_df.empty else 0
                 ws.set_column(i, i, max(len(col), data_max) + 2)
